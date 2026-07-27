@@ -1,0 +1,38 @@
+# Dart / pub
+.dart_tool/
+.packages
+build/
+doc/api/
+
+# A library must not pin its dependencies — apps resolve them.
+pubspec.lock
+
+# Test & coverage output
+coverage/
+.test_coverage.dart
+test/.test_coverage.dart
+*.lcov
+
+# Flutter (for any example app added later)
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# Local config & secrets
+.env
+.env.*
+*.pem
+secrets.json
+
+# IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
