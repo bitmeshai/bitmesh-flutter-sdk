@@ -11,3 +11,9 @@ Initial release, extracted and generalised from an in-app `BitmeshClient`.
 - Built-in polling helpers for async jobs (`video`, `transcription`, `tools`).
 - Cross-platform uploads via `BitmeshFile` (path or in-memory bytes).
 - Injectable `http.Client` for connection reuse and testing.
+- Response parsing accepts both camelCase and snake_case keys: the live API
+  answers real requests in camelCase while the docs and the `test: true` debug
+  path use snake_case.
+
+Verified against the live `/chat` endpoint on 2026-07-27. Payloads captured from
+that run are pinned in `test/api_payloads_test.dart`.

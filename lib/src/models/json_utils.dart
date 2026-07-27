@@ -5,12 +5,44 @@
 library;
 
 /// Returns the first non-null value among [keys].
+///
+/// Each key is also tried in its other casing: the API answers real requests in
+/// camelCase (`finishReason`, `promptTokens`) but documents — and returns, on
+/// the `test: true` debug path — snake_case (`finish_reason`, `prompt_tokens`).
+/// Callers pass one spelling and get both.
 Object? pick(Map<String, dynamic> json, List<String> keys) {
   for (final key in keys) {
     final value = json[key];
     if (value != null) return value;
   }
+  for (final key in keys) {
+    for (final variant in caseVariants(key)) {
+      final value = json[variant];
+      if (value != null) return value;
+    }
+  }
   return null;
+}
+
+/// The snake_case and camelCase spellings of [key], excluding [key] itself.
+Iterable<String> caseVariants(String key) sync* {
+  if (key.contains('_')) {
+    final parts = key.split('_').where((p) => p.isNotEmpty).toList();
+    if (parts.length > 1) {
+      yield parts.first +
+          parts
+              .skip(1)
+              .map((p) => p[0].toUpperCase() + p.substring(1))
+              .join();
+    }
+  } else if (key.contains(RegExp('[A-Z]'))) {
+    yield key
+        .replaceAllMapped(
+          RegExp('[A-Z]'),
+          (m) => '_${m.group(0)!.toLowerCase()}',
+        )
+        .replaceAll(RegExp('^_'), '');
+  }
 }
 
 String? asString(Object? value) {

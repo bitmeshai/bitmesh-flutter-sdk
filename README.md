@@ -124,6 +124,29 @@ final chat = await client.chat.create(ChatRequest(
 `completion.raw` always holds the untouched response body, so a new API field
 never blocks you.
 
+### Quirks worth knowing
+
+Verified against the live API on 2026-07-27 with `bitmeshai/chat-now-nano`
+(which currently resolves to `gpt-5-nano`):
+
+- **`max_tokens` must be generous on reasoning models.** The budget is spent on
+  hidden reasoning tokens *before* any visible output. `maxTokens: 10` returned
+  `content: ""` with `finishReason: 'length'` and 10 reasoning tokens. If
+  `completion.text` is unexpectedly `null`, check
+  `completion.choices.first.finishReason` — `'length'` means raise the budget.
+  A few hundred tokens is a safe floor.
+- **Some models reject non-default `temperature`, and answer 500 rather than
+  400.** `temperature: 0.2` produced
+  `500 Unsupported value: 'temperature' does not support 0.2 with this model`,
+  which surfaces as `BitmeshServerException`. Omit `temperature` unless you know
+  the model accepts it. (This is also why writes don't retry 5xx by default —
+  retrying would just burn attempts on a permanent error.)
+- **Responses come back in camelCase** (`finishReason`, `promptTokens`) even
+  though the docs show snake_case; the `test: true` debug path uses snake_case.
+  The SDK reads both, so you don't have to care.
+- **`completion.model` reports the resolved upstream model**
+  (`gpt-5-nano-2025-08-07`), not the alias you requested.
+
 ## Images
 
 ```dart

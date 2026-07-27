@@ -191,7 +191,7 @@ class TokenUsage {
         promptTokens: asInt(pick(json, ['prompt_tokens', 'input_tokens'])),
         completionTokens:
             asInt(pick(json, ['completion_tokens', 'output_tokens'])),
-        totalTokens: asInt(json['total_tokens']),
+        totalTokens: asInt(pick(json, ['total_tokens'])),
       );
 
   @override
@@ -219,7 +219,7 @@ class ChatChoice {
       message: message != null
           ? ChatMessage.fromJson(message)
           : ChatMessage.assistant(asString(json['text']) ?? ''),
-      finishReason: asString(json['finish_reason']),
+      finishReason: asString(pick(json, ['finish_reason'])),
     );
   }
 
