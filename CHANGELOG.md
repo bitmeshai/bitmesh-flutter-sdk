@@ -1,3 +1,16 @@
+## 0.2.0
+
+- Firebase App Check support for mobile API keys. Set
+  `BitmeshOptions.appCheckTokenProvider` and the SDK sends a fresh token in
+  `X-Firebase-AppCheck` on every signed request, retries and polling included.
+  The token is outside both signatures and is never logged. The package still
+  has no Firebase dependency.
+- `BitmeshAppCheckTokenException`: the provider threw or returned no token, so
+  the request was not sent.
+- `BitmeshAppCheckRejectedException` (a `BitmeshAuthenticationException`): the
+  API answered 401 because the token was missing or failed verification.
+  `isTemporary` flags the API-side outage case worth retrying.
+
 ## 0.1.0
 
 Initial release, extracted and generalised from an in-app `BitmeshClient`.

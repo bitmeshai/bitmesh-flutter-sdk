@@ -38,6 +38,22 @@ class BitmeshNetworkException extends BitmeshException {
       '${cause == null ? '' : ' (caused by $cause)'}';
 }
 
+/// Thrown when [BitmeshOptions.appCheckTokenProvider] could not supply a
+/// token, so the request was not sent.
+///
+/// On a device this usually means App Check is not set up for the app in the
+/// Firebase console (Play Integrity / App Attest registration, debug token).
+class BitmeshAppCheckTokenException extends BitmeshException {
+  const BitmeshAppCheckTokenException(super.message, {this.cause});
+
+  /// The error thrown by the token provider, if it threw.
+  final Object? cause;
+
+  @override
+  String toString() => 'BitmeshAppCheckTokenException: $message'
+      '${cause == null ? '' : ' (caused by $cause)'}';
+}
+
 /// Thrown when a single HTTP attempt exceeded [BitmeshOptions.timeout].
 class BitmeshTimeoutException extends BitmeshException {
   const BitmeshTimeoutException(this.timeout, {String? detail})
@@ -150,6 +166,22 @@ class BitmeshApiException extends BitmeshException {
           type: parsed.type,
         );
       case 401:
+        if (_isAppCheckError(message)) {
+          return BitmeshAppCheckRejectedException(
+            statusCode: statusCode,
+            message: message,
+            body: body,
+            code: parsed.code,
+            type: parsed.type,
+          );
+        }
+        return BitmeshAuthenticationException(
+          statusCode: statusCode,
+          message: message,
+          body: body,
+          code: parsed.code,
+          type: parsed.type,
+        );
       case 403:
         return BitmeshAuthenticationException(
           statusCode: statusCode,
@@ -229,6 +261,26 @@ class BitmeshAuthenticationException extends BitmeshApiException {
   });
 }
 
+/// 401 — the API key is a mobile key and the request's App Check token was
+/// missing or failed verification. [message] names the reason, for example
+/// `App Check token is for an unregistered app`.
+///
+/// A subtype of [BitmeshAuthenticationException], so existing handlers still
+/// catch it.
+class BitmeshAppCheckRejectedException extends BitmeshAuthenticationException {
+  BitmeshAppCheckRejectedException({
+    required super.statusCode,
+    required super.message,
+    super.body,
+    super.code,
+    super.type,
+  });
+
+  /// True when the API could not verify tokens at all, rather than rejecting
+  /// this one. Worth retrying after a pause; nothing on the device is wrong.
+  bool get isTemporary => message.contains('temporarily unavailable');
+}
+
 /// 404 — unknown endpoint, or a job id that does not exist.
 class BitmeshNotFoundException extends BitmeshApiException {
   BitmeshNotFoundException({
@@ -290,6 +342,10 @@ _ParsedError _parseError(String body) {
     return const _ParsedError();
   }
 }
+
+// Every App Check failure message from the API names App Check or its header.
+bool _isAppCheckError(String message) =>
+    message.contains('App Check') || message.contains('X-Firebase-AppCheck');
 
 Duration? _parseRetryAfter(String? headerValue) {
   if (headerValue == null) return null;

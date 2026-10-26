@@ -12,6 +12,7 @@ hierarchy, and works anywhere Dart runs.
 - **Transcription** of recorded audio, from a file path or from memory
 - **Tools** (`background-removal`, `try-on-clothes`, and any other `/tools`
   endpoint) with async task polling
+- Firebase **App Check** for mobile keys, one option to turn it on
 - Typed errors, automatic retries, injectable `http.Client`, pluggable logger
 - No Flutter dependency: runs in Flutter apps (incl. web), CLIs and servers
 
@@ -24,7 +25,7 @@ dependencies:
   bitmesh_flutter_sdk:
     git:
       url: https://github.com/bitmeshai/bitmesh-flutter-sdk.git
-      ref: v0.1.0
+      ref: v0.2.0
 ```
 
 Or, while developing side by side:
@@ -96,6 +97,67 @@ final client = BitmeshClient(
   httpClient: myHttpClient,                  // optional, not closed by close()
 );
 ```
+
+## App Check (mobile keys)
+
+If your key ships inside an iOS or Android app, create it as a **Mobile app**
+key in the Bitmesh dashboard. The API then refuses any request on that key
+that doesn't carry a valid [Firebase App Check](https://firebase.google.com/docs/app-check)
+token, so a secret extracted from your app binary is useless on its own.
+Server keys don't need this; leave the option unset.
+
+Set up App Check for your apps in the Firebase console first (Play Integrity on
+Android, App Attest on iOS, debug tokens for emulators). The full walkthrough
+is in the [API docs](https://bitmesh.ai/docs#app-check). Then hand the SDK a
+token provider:
+
+```dart
+import 'package:firebase_app_check/firebase_app_check.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
+
+await Firebase.initializeApp();
+await FirebaseAppCheck.instance.activate(
+  // Debug provider in debug builds ONLY. Never ship it in a release.
+  providerAndroid:
+      kDebugMode ? AndroidDebugProvider() : AndroidPlayIntegrityProvider(),
+  providerApple: kDebugMode ? AppleDebugProvider() : AppleAppAttestProvider(),
+);
+
+final client = BitmeshClient(
+  credentials: credentials,
+  options: BitmeshOptions(
+    appCheckTokenProvider: () => FirebaseAppCheck.instance.getToken(),
+  ),
+);
+```
+
+- The provider is called before **every** signed request, retries and job
+  polling included. Firebase caches the token and refreshes it before it
+  expires, so this is cheap. Don't cache tokens yourself.
+- The token goes in the `X-Firebase-AppCheck` header. It is not part of either
+  signature, and the SDK never logs it.
+- Unsigned result downloads (`images.download`, tool results) don't send it.
+- This package doesn't depend on Firebase: any function returning a token
+  works, which keeps plain Dart and tests free of plugins.
+
+Failures are typed:
+
+```dart
+try {
+  await client.chat.create(request);
+} on BitmeshAppCheckTokenException catch (e) {
+  // No token on the device, so nothing was sent. e.cause holds the Firebase
+  // error. Usually App Check isn't set up for this app in the Firebase console.
+} on BitmeshAppCheckRejectedException catch (e) {
+  // 401: the API refused the token. e.message names the reason, e.g.
+  // "App Check token is for an unregistered app". e.isTemporary is true only
+  // when the API couldn't verify tokens at all; retry later in that case.
+}
+```
+
+`BitmeshAppCheckRejectedException` extends `BitmeshAuthenticationException`,
+so existing 401 handlers still catch it.
 
 ## Chat
 
@@ -234,6 +296,8 @@ Everything thrown by the SDK extends `BitmeshException`:
 ```dart
 try {
   final completion = await client.chat.create(request);
+} on BitmeshAppCheckRejectedException catch (e) {
+  // 401 — mobile key: App Check token missing or refused (see App Check)
 } on BitmeshAuthenticationException {
   // 401/403 — bad or revoked credentials
 } on BitmeshRateLimitException catch (e) {
@@ -246,6 +310,8 @@ try {
   // never reached the API: offline, DNS, TLS
 } on BitmeshTimeoutException {
   // exceeded BitmeshOptions.timeout
+} on BitmeshAppCheckTokenException {
+  // the App Check token provider failed, so nothing was sent
 } on BitmeshException catch (e) {
   // catch-all
 }

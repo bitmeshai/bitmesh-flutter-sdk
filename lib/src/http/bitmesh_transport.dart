@@ -55,6 +55,9 @@ class BitmeshTransport {
     }
   }
 
+  /// Header carrying the Firebase App Check token on mobile keys.
+  static const String appCheckHeader = 'X-Firebase-AppCheck';
+
   final OAuth1Signer signer;
   final BitmeshOptions options;
   final http.Client _httpClient;
@@ -76,10 +79,12 @@ class BitmeshTransport {
       uri: uri,
       idempotent: false,
       buildRequest: () async {
+        final appCheckToken = await _appCheckToken();
         final oauth = signer.generateParams(method, uri);
         return http.Request(method, uri)
           ..headers.addAll(_headers(
             oauth: oauth,
+            appCheckToken: appCheckToken,
             payloadSignature:
                 signer.payloadSignature(jsonBody, oauth['oauth_signature']!),
             contentType: 'application/json',
@@ -103,10 +108,12 @@ class BitmeshTransport {
       uri: uri,
       idempotent: true,
       buildRequest: () async {
+        final appCheckToken = await _appCheckToken();
         final oauth = signer.generateParams('GET', uri);
         return http.Request('GET', uri)
           ..headers.addAll(_headers(
             oauth: oauth,
+            appCheckToken: appCheckToken,
             payloadSignature:
                 signer.payloadSignature('', oauth['oauth_signature']!),
           ));
@@ -137,10 +144,12 @@ class BitmeshTransport {
       uri: uri,
       idempotent: false,
       buildRequest: () async {
+        final appCheckToken = await _appCheckToken();
         final oauth = signer.generateParams('POST', uri);
         final request = http.MultipartRequest('POST', uri)
           ..headers.addAll(_headers(
             oauth: oauth,
+            appCheckToken: appCheckToken,
             payloadSignature: signer.multipartPayloadSignature(
               fields,
               oauth['oauth_signature']!,
@@ -252,6 +261,7 @@ class BitmeshTransport {
   Map<String, String> _headers({
     required Map<String, String> oauth,
     required String payloadSignature,
+    String? appCheckToken,
     String? contentType,
   }) {
     return {
@@ -259,9 +269,42 @@ class BitmeshTransport {
       if (options.userAgent != null) 'User-Agent': options.userAgent!,
       'Authorization': signer.authorizationHeader(oauth),
       'X-Payload-Signature': payloadSignature,
+      if (appCheckToken != null) appCheckHeader: appCheckToken,
       'Accept': 'application/json',
       if (contentType != null) 'Content-Type': contentType,
     };
+  }
+
+  /// The App Check token for one attempt, or `null` when no provider is set.
+  ///
+  /// Asked for per attempt, like the signature, so a retry never carries a
+  /// token that expired while backing off. A provider that fails stops the
+  /// request here: without a token a mobile key is refused anyway.
+  Future<String?> _appCheckToken() async {
+    final provider = options.appCheckTokenProvider;
+    if (provider == null) return null;
+
+    String? token;
+    try {
+      token = await provider();
+    } catch (e, s) {
+      _log(BitmeshLogLevel.error, 'App Check token provider failed',
+          error: e, stackTrace: s);
+      throw BitmeshAppCheckTokenException(
+        'Could not get a Firebase App Check token. Check that App Check is '
+        'set up for this app in the Firebase console.',
+        cause: e,
+      );
+    }
+
+    if (token == null || token.trim().isEmpty) {
+      _log(BitmeshLogLevel.error, 'App Check token provider returned no token');
+      throw const BitmeshAppCheckTokenException(
+        'The App Check token provider returned no token. Check that App '
+        'Check is activated before the first request.',
+      );
+    }
+    return token;
   }
 
   Future<BitmeshResponse> _send({
