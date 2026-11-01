@@ -66,17 +66,63 @@ class OAuth1Signer {
 
   /// `X-Payload-Signature` for a multipart request.
   ///
-  /// The signature covers the JSON encoding of [fields] with its **top-level**
-  /// keys sorted — not the flattened form-field names actually sent on the
-  /// wire. This mirrors the server's verification.
+  /// The signature covers the JSON encoding of the non-file fields as the
+  /// server receives them, with the **top-level** keys sorted — not the
+  /// flattened form-field names actually sent on the wire. Multipart carries
+  /// text, so values are first converted with [multipartWireFields]; the server
+  /// then trims every string and turns empty strings into `null`. With no
+  /// fields at all the server hashes `[]`, not `{}`.
   String multipartPayloadSignature(
     Map<String, dynamic> fields,
     String oauthSignature,
   ) {
-    final sorted = Map<String, dynamic>.fromEntries(
-      fields.entries.toList()..sort((a, b) => a.key.compareTo(b.key)),
-    );
+    final received = _asReceived(multipartWireFields(fields)) as Map;
+    if (received.isEmpty) return payloadSignature('[]', oauthSignature);
+
+    final keys = received.keys.map((k) => k.toString()).toList()..sort();
+    final sorted = {for (final k in keys) k: received[k]};
     return payloadSignature(jsonEncode(sorted), oauthSignature);
+  }
+
+  /// The multipart fields as they go over the wire: booleans become `"1"` or
+  /// `"0"`, numbers their string form, and `null`s and empty collections are
+  /// left out. Nested maps and lists are kept for flattening.
+  static Map<String, dynamic> multipartWireFields(Map<String, dynamic> fields) {
+    final wire = _wireValue(fields);
+    return wire is Map<String, dynamic> ? wire : <String, dynamic>{};
+  }
+
+  static Object? _wireValue(Object? value) {
+    if (value == null) return null;
+    if (value is bool) return value ? '1' : '0';
+    if (value is String) return value;
+    if (value is num) return value.toString();
+    if (value is Map) {
+      final out = <String, dynamic>{};
+      value.forEach((key, item) {
+        final wire = _wireValue(item);
+        if (wire != null) out[key.toString()] = wire;
+      });
+      return out.isEmpty ? null : out;
+    }
+    if (value is Iterable) {
+      final out = value.map(_wireValue).whereType<Object>().toList();
+      return out.isEmpty ? null : out;
+    }
+    return value.toString();
+  }
+
+  /// Mirrors the server's TrimStrings and ConvertEmptyStringsToNull.
+  static Object? _asReceived(Object? value) {
+    if (value is String) {
+      final trimmed = value.trim();
+      return trimmed.isEmpty ? null : trimmed;
+    }
+    if (value is Map) {
+      return {for (final e in value.entries) e.key: _asReceived(e.value)};
+    }
+    if (value is List) return value.map(_asReceived).toList();
+    return value;
   }
 
   /// HMAC-SHA1 OAuth signature, base64 encoded.

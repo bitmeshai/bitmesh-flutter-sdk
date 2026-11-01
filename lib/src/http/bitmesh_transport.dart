@@ -137,7 +137,8 @@ class BitmeshTransport {
     }
 
     final uri = buildUri(path);
-    final flatFields = flattenFields(fields);
+    // Multipart carries text: send exactly the strings the signature covers.
+    final flatFields = flattenFields(OAuth1Signer.multipartWireFields(fields));
 
     final response = await _send(
       method: 'POST',
@@ -171,8 +172,11 @@ class BitmeshTransport {
   }
 
   /// Unsigned `GET` for public result URLs (`/imgrslt/...`, tool outputs).
-  Future<BitmeshResponse> getPublic(String path) {
-    final uri = buildUri(path);
+  Future<BitmeshResponse> getPublic(String path) => getPublicUri(buildUri(path));
+
+  /// Unsigned `GET` of an absolute URL, such as a result link that a tool's
+  /// provider hosts itself.
+  Future<BitmeshResponse> getPublicUri(Uri uri) {
     return _send(
       method: 'GET',
       uri: uri,

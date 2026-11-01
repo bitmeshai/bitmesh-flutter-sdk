@@ -22,6 +22,7 @@ enum JobStatus {
   static JobStatus parse(String? value) {
     switch (value?.toLowerCase().replaceAll('-', '_')) {
       case 'queued':
+      case 'queuing':
       case 'pending':
       case 'created':
       case 'waiting':
@@ -41,6 +42,7 @@ enum JobStatus {
       case 'done':
         return JobStatus.completed;
       case 'failed':
+      case 'fail':
       case 'failure':
       case 'error':
         return JobStatus.failed;

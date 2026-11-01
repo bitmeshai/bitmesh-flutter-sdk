@@ -147,17 +147,38 @@ void main() {
       );
     });
 
-    test('multipart payload signature matches, including key ordering', () {
+    test('multipart payload signature covers the fields as the server receives them', () {
+      // Multipart carries text, and the server trims strings, turns empty
+      // strings into null and sorts only the top-level keys.
       final fields = <String, dynamic>{
         'zeta': 1,
-        'alpha': 'a',
+        'alpha': ' a ',
+        'flag': true,
+        'off': false,
+        'blank': '',
+        'skipped': null,
         'nested': {'b': 2, 'a': 1},
         'speech_models': ['whisper', 'nova'],
       };
       const oauthSig = 'multipart-sig';
+      const received = '{"alpha":"a","blank":null,"flag":"1",'
+          '"nested":{"b":"2","a":"1"},"off":"0",'
+          '"speech_models":["whisper","nova"],"zeta":"1"}';
       expect(
         newSigner().multipartPayloadSignature(fields, oauthSig),
-        equals(legacy.multipartPayloadSignature(fields, oauthSig)),
+        equals(legacy.payloadSignature(received, oauthSig)),
+      );
+    });
+
+    test('a multipart request with no fields signs an empty JSON array', () {
+      const oauthSig = 'multipart-sig';
+      expect(
+        newSigner().multipartPayloadSignature(const {}, oauthSig),
+        equals(legacy.payloadSignature('[]', oauthSig)),
+      );
+      expect(
+        newSigner().multipartPayloadSignature(const {'gone': null}, oauthSig),
+        equals(legacy.payloadSignature('[]', oauthSig)),
       );
     });
   });

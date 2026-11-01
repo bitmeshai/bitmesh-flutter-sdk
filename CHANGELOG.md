@@ -1,3 +1,22 @@
+## 0.3.0
+
+- Image-to-video: `client.tools.imageAnimate`, `imageAnimateStatus` and
+  `waitForImageAnimate` for `POST /tools/video/image-animate` and
+  `GET /tools/video/image-animate/{task_id}`, plus raw `imageAnimate` /
+  `getImageAnimate` in the compat layer. Pass `test: true` to try it free.
+- Fixed `Invalid payload signature` on multipart uploads whose fields were not
+  all strings, or that had no fields at all. Booleans are now sent as
+  `"1"`/`"0"` and numbers as strings, `null`s are left out, and the signature
+  covers the values exactly as the server receives them (trimmed, empty
+  strings as `null`, `[]` when there are none).
+- `ToolTask.outputUrls` now finds try-on results in `output.image_url`, lists
+  of links under `data.images`, and videos in `data.output_videos`. It no
+  longer reports the API's callback relay address or echoed inputs as results.
+- `fetchResult` / `fetchResultBytes` download absolute links from their own
+  host, so result links on the provider's storage work.
+- `JobStatus` understands `QUEUING` and `fail`.
+- `BitmeshFile.readBytes()` reads a file from memory or disk.
+
 ## 0.2.0
 
 - Firebase App Check support for mobile API keys. Set

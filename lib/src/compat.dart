@@ -67,6 +67,17 @@ extension BitmeshRawApi on BitmeshClient {
   Future<Map<String, dynamic>> toolsQueryAsyncTaskResult(String taskId) =>
       tools.queryAsyncTaskResultRaw(taskId);
 
+  /// `POST /tools/video/image-animate` with a raw JSON payload.
+  Future<Map<String, dynamic>> imageAnimate(Map<String, dynamic> payload) =>
+      tools.imageAnimateRaw(payload);
+
+  /// `GET /tools/video/image-animate/{task_id}`.
+  Future<Map<String, dynamic>> getImageAnimate(
+    String taskId, {
+    Map<String, String> query = const {},
+  }) =>
+      tools.imageAnimateStatusRaw(taskId, query: query);
+
   /// Unsigned `GET` of a tool result, returned as text.
   Future<String> getToolsResult(String path) => tools.fetchResult(path);
 

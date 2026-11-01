@@ -46,7 +46,7 @@ class ToolTask {
           '',
       status: JobStatus.parse(rawStatus),
       rawStatus: rawStatus,
-      outputUrls: _collectUrls(json),
+      outputUrls: _outputUrls(json),
       error: error != null
           ? asString(error['message'])
           : asString(pick(json, ['error', 'message', 'error_message'])),
@@ -65,6 +65,33 @@ class ToolTask {
       'ToolTask($taskId, status: ${rawStatus ?? status.name}, '
       'outputs: ${outputUrls.length})';
 
+  /// Result locations, read from the places the tools put them first:
+  /// `data.image_url` (background removal), `output.image_url` (try-on),
+  /// `data.images` and `data.output_videos[].url` (image animation). Anything
+  /// else that looks like a result is collected after those.
+  static List<String> _outputUrls(Map<String, dynamic> json) {
+    final data = asMap(json['data']);
+    final output = asMap(json['output']);
+    final known = <String>[
+      if (asString(data?['image_url']) case final url? when url.isNotEmpty) url,
+      if (asString(output?['image_url']) case final url? when url.isNotEmpty)
+        url,
+      ...?_strings(data?['images']),
+      ...asMapList(data?['output_videos'])
+          .map((video) => asString(video['url']))
+          .whereType<String>(),
+    ];
+    return {...known, ..._collectUrls(json)}.toList(growable: false);
+  }
+
+  static List<String>? _strings(Object? value) => value is List
+      ? value.whereType<String>().where((s) => s.isNotEmpty).toList()
+      : null;
+
+  /// Keys that hold addresses but never a result: the relay address the API
+  /// registers for provider callbacks, and echoed request inputs.
+  static const _notResults = {'callback_url', 'inputs'};
+
   /// Walks the payload collecting anything that looks like a result location.
   static List<String> _collectUrls(Object? node, [int depth = 0]) {
     if (depth > 6) return const [];
@@ -73,12 +100,16 @@ class ToolTask {
     if (node is Map) {
       node.forEach((key, value) {
         final name = key.toString().toLowerCase();
-        if (value is String &&
-            value.isNotEmpty &&
-            (name.contains('url') ||
-                name.contains('image') ||
-                name.contains('file_path'))) {
+        if (_notResults.contains(name)) return;
+        final named = name.contains('url') ||
+            name.contains('image') ||
+            name.contains('video') ||
+            name.contains('file_path');
+        if (value is String && value.isNotEmpty && named) {
           found.add(value);
+        } else if (value is List && named) {
+          found.addAll(value.whereType<String>().where((s) => s.isNotEmpty));
+          found.addAll(_collectUrls(value, depth + 1));
         } else {
           found.addAll(_collectUrls(value, depth + 1));
         }

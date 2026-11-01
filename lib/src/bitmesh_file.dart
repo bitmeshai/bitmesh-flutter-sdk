@@ -90,6 +90,15 @@ class BitmeshFile {
     }
   }
 
+  /// The file's contents, read from memory or from disk.
+  Future<Uint8List> readBytes() async {
+    validate();
+    final bytes = this.bytes;
+    if (bytes != null) return bytes;
+    final read = await readFileBytes(path!);
+    return read is Uint8List ? read : Uint8List.fromList(read);
+  }
+
   Future<http.MultipartFile> toMultipartFile() async {
     validate();
     final mediaType = contentType == null ? null : MediaType.parse(contentType!);

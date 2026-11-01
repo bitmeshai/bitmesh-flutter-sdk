@@ -10,8 +10,8 @@ hierarchy, and works anywhere Dart runs.
 - **Chat** completions across 90+ models
 - **Image** and **video** generation, with polling for async video jobs
 - **Transcription** of recorded audio, from a file path or from memory
-- **Tools** (`background-removal`, `try-on-clothes`, and any other `/tools`
-  endpoint) with async task polling
+- **Tools**: background removal, virtual try-on and image-to-video
+  (`image-animate`), with task polling
 - Firebase **App Check** for mobile keys, one option to turn it on
 - Typed errors, automatic retries, injectable `http.Client`, pluggable logger
 - No Flutter dependency: runs in Flutter apps (incl. web), CLIs and servers
@@ -25,7 +25,7 @@ dependencies:
   bitmesh_flutter_sdk:
     git:
       url: https://github.com/bitmeshai/bitmesh-flutter-sdk.git
-      ref: v0.2.0
+      ref: v0.3.0
 ```
 
 Or, while developing side by side:
@@ -271,23 +271,45 @@ final job = await client.transcription.transcribe(
 ## Tools
 
 ```dart
-final task = await client.tools.backgroundRemoval(
+// Background removal answers straight away with the result link
+final cutout = await client.tools.backgroundRemoval(
   BitmeshFile.fromPath(imagePath),
-  fields: {'output_format': 'png'},
+  fields: {'return_form': 'crop'}, // or 'mask', 'whiteBK'; leave out for a transparent PNG
 );
+final png = await client.tools.fetchResultBytes(cutout.outputUrl!);
 
-final done = await client.tools.waitFor(task.taskId);
-final cutout = await client.tools.fetchResultBytes(done.outputUrl!);
+// Try-on returns a task: poll it until the picture is ready
+final job = await client.tools.tryOnClothes(
+  {
+    'person_image': BitmeshFile.fromPath(personPath),
+    'top_garment': BitmeshFile.fromPath(shirtPath),
+    // 'bottom_garment': BitmeshFile.fromPath(trousersPath),
+  },
+  fields: {'restore_face': true, 'resolution': 1024},
+);
+final dressed = await client.tools.waitFor(
+  job.taskId,
+  // Polling counts toward the per-IP limit of 10 media requests a minute
+  options: const PollingOptions(interval: Duration(seconds: 10)),
+);
+final picture = await client.tools.fetchResultBytes(dressed.outputUrl!);
 
-// Try-on-clothes takes several named files
-await client.tools.tryOnClothes({
-  'person_image': BitmeshFile.fromPath(personPath),
-  'clothes_image': BitmeshFile.fromPath(clothesPath),
-});
-
-// Any other /tools endpoint
-await client.tools.run('/tools/general/upscale', files: [file]);
+// Image-to-video: the image goes base64-encoded in a JSON body
+final animation = await client.tools.imageAnimate(
+  model: 'animate-2.4-faster', // or 'animate-2.4-advanced'
+  image: BitmeshFile.fromPath(imagePath),
+  seconds: 5, // 1 to 10
+  prompt: 'the cat slowly blinks',
+  aspectRatio: '9:16', // optional: 16:9, 9:16, 1:1, 4:3, 3:4
+);
+final video = await client.tools.waitForImageAnimate(animation.taskId);
+print(video.outputUrl); // signed link, valid for about 8 hours
 ```
+
+Multipart form fields travel as text. The SDK sends booleans as `"1"` / `"0"`
+and numbers as their string form, signs exactly what it sends, and leaves out
+`null`s. Result links can point at the tool provider's own storage and expire,
+so download what you want to keep.
 
 ## Errors
 
@@ -384,7 +406,8 @@ final video = await client.getVideo(id);
 `chat`, `image`, `video`, `getVideo`, `transcribeFile`, `getTranscribeRecorded`,
 `toolsGeneralBackgroundRemoval`, `toolsPortraitTryOnClothes`,
 `toolsQueryAsyncTaskResult` and `getToolsResult` all keep their original
-signatures and behaviour. Move to the typed APIs when convenient.
+signatures and behaviour. `imageAnimate` and `getImageAnimate` match the PHP
+SDK's methods of the same names. Move to the typed APIs when convenient.
 
 Behaviour that intentionally changed:
 
