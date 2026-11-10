@@ -15,7 +15,7 @@ abstract class BitmeshException implements Exception {
   String toString() => '$runtimeType: $message';
 }
 
-/// Thrown when the SDK is misconfigured (missing key/secret, bad base URL...).
+/// Thrown when the SDK is misconfigured (missing or v1 key, bad base URL...).
 class BitmeshConfigurationException extends BitmeshException {
   const BitmeshConfigurationException(super.message);
 }
@@ -182,6 +182,14 @@ class BitmeshApiException extends BitmeshException {
           code: parsed.code,
           type: parsed.type,
         );
+      case 402:
+        return BitmeshInsufficientBalanceException(
+          statusCode: statusCode,
+          message: message,
+          body: body,
+          code: parsed.code,
+          type: parsed.type,
+        );
       case 403:
         return BitmeshAuthenticationException(
           statusCode: statusCode,
@@ -250,7 +258,8 @@ class BitmeshBadRequestException extends BitmeshApiException {
   });
 }
 
-/// 401 / 403 — the key/secret pair was rejected or lacks access.
+/// 401 / 403: the key was rejected, or the request came from an address
+/// outside a server key's IP allowlist.
 class BitmeshAuthenticationException extends BitmeshApiException {
   BitmeshAuthenticationException({
     required super.statusCode,
@@ -261,9 +270,9 @@ class BitmeshAuthenticationException extends BitmeshApiException {
   });
 }
 
-/// 401 — the API key is a mobile key and the request's App Check token was
-/// missing or failed verification. [message] names the reason, for example
-/// `App Check token is for an unregistered app`.
+/// 401 — the API key is a mobile key and the request's App Check token (or
+/// debug token) was missing or failed verification. [message] names the
+/// reason, for example `App Check token is for an unregistered app`.
 ///
 /// A subtype of [BitmeshAuthenticationException], so existing handlers still
 /// catch it.
@@ -279,6 +288,17 @@ class BitmeshAppCheckRejectedException extends BitmeshAuthenticationException {
   /// True when the API could not verify tokens at all, rather than rejecting
   /// this one. Worth retrying after a pause; nothing on the device is wrong.
   bool get isTemporary => message.contains('temporarily unavailable');
+}
+
+/// 402: the account has no credits left, or (proxy keys) no active plan.
+class BitmeshInsufficientBalanceException extends BitmeshApiException {
+  BitmeshInsufficientBalanceException({
+    required super.statusCode,
+    required super.message,
+    super.body,
+    super.code,
+    super.type,
+  });
 }
 
 /// 404 — unknown endpoint, or a job id that does not exist.
@@ -343,9 +363,12 @@ _ParsedError _parseError(String body) {
   }
 }
 
-// Every App Check failure message from the API names App Check or its header.
+// Every App Check failure message from the API names App Check, its header,
+// or the debug token standing in for it.
 bool _isAppCheckError(String message) =>
-    message.contains('App Check') || message.contains('X-Firebase-AppCheck');
+    message.contains('App Check') ||
+    message.contains('X-Firebase-AppCheck') ||
+    message.toLowerCase().contains('debug token');
 
 Duration? _parseRetryAfter(String? headerValue) {
   if (headerValue == null) return null;

@@ -1,20 +1,25 @@
 # bitmesh_flutter_sdk
 
-A reusable Dart & Flutter SDK for the [Bitmesh](https://bitmesh.ai) AI API.
+A Dart & Flutter SDK for the [Bitmesh](https://bitmesh.ai) AI API **v2**.
 
-Bitmesh authenticates with 0-legged OAuth 1.0a plus a second SHA-256 payload
-signature — fiddly enough that you don't want a copy of it in every app. This
-package wraps it, adds typed models, retries, job polling and a proper exception
-hierarchy, and works anywhere Dart runs.
+v2 takes one bearer key (`bmk_...`), so there is nothing to sign. This package
+adds what is still worth not rewriting in every app: typed models, streaming,
+retries, job polling, App Check and a proper exception hierarchy. It works
+anywhere Dart runs.
 
-- **Chat** completions across 90+ models
+- **Chat** completions across 90+ models, whole or **streamed**
 - **Image** and **video** generation, with polling for async video jobs
 - **Transcription** of recorded audio, from a file path or from memory
 - **Tools**: background removal, virtual try-on and image-to-video
   (`image-animate`), with task polling
-- Firebase **App Check** for mobile keys, one option to turn it on
+- The **proxy**: call OpenAI, Anthropic and other providers with a proxy key
+- Firebase **App Check** for mobile keys, and debug tokens for simulators
 - Typed errors, automatic retries, injectable `http.Client`, pluggable logger
 - No Flutter dependency: runs in Flutter apps (incl. web), CLIs and servers
+
+API v1 (OAuth 1.0 consumer key and secret) is not supported from 1.0.0 on. Use
+0.3.0 for a v1 key, or create a v2 key in the dashboard; see
+[Moving from 0.x](#moving-from-0x).
 
 ---
 
@@ -25,7 +30,7 @@ dependencies:
   bitmesh_flutter_sdk:
     git:
       url: https://github.com/bitmeshai/bitmesh-flutter-sdk.git
-      ref: v0.3.0
+      ref: v1.0.0
 ```
 
 Or, while developing side by side:
@@ -41,7 +46,7 @@ dependencies:
 ```dart
 import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
 
-final client = BitmeshClient.fromKeys(key, secret);
+final client = BitmeshClient(apiKey: 'bmk_...');
 
 final completion = await client.chat.create(const ChatRequest(
   model: 'bitmeshai/chat-now-nano',
@@ -60,26 +65,29 @@ print(completion.usage?.totalTokens);
 Create **one** client and keep it: it owns a connection pool, is safe to use
 concurrently, and calling `close()` is only needed when you're finished with it.
 
-## Credentials
+## Keys
 
-Never ship the key/secret inside your bundle. Load them at runtime:
+Create a key in the dashboard under **Keys**: **Bitmesh hosts the model** for
+chat, images and the other endpoints, or **I bring my provider key** for the
+proxy. Choose **In my mobile app** for a key that ships in an app (it then
+requires App Check), or **On my server** (optionally limited to your servers'
+IP addresses).
+
+Never hardcode the key. Load it at runtime:
 
 ```dart
 // Firebase Remote Config
-final client = BitmeshClient(
-  credentials: BitmeshCredentials.fromMap({
-    'bitmesh_key': remoteConfig.getString('bitmesh_key'),
-    'bitmesh_secret': remoteConfig.getString('bitmesh_secret'),
-  }),
-);
+final client = BitmeshClient(apiKey: remoteConfig.getString('bitmesh_key'));
 
-// --dart-define=BITMESH_KEY=... --dart-define=BITMESH_SECRET=...
-final client = BitmeshClient(credentials: BitmeshCredentials.fromEnvironment());
+// --dart-define=BITMESH_KEY=bmk_...
+final client = BitmeshClient(
+  apiKey: const String.fromEnvironment('BITMESH_KEY'),
+);
 ```
 
-Empty or whitespace-only values throw `BitmeshConfigurationException`
-immediately, instead of failing later as an opaque 401. `BitmeshCredentials`
-redacts itself in `toString()`, so it is safe to log.
+An empty key, or one that doesn't start with `bmk_` (a v1 consumer key),
+throws `BitmeshConfigurationException` straight away instead of failing later
+as a 401. The SDK never logs the key.
 
 ## Configuration
 
@@ -87,7 +95,7 @@ redacts itself in `toString()`, so it is safe to log.
 final client = BitmeshClient(
   credentials: credentials,
   options: BitmeshOptions(
-    baseUrl: 'https://api.bitmesh.ai',       // point at staging or a proxy
+    baseUrl: 'https://api.bitmesh.ai',       // the SDK adds /v2
     timeout: const Duration(seconds: 45),    // per attempt
     retryPolicy: const RetryPolicy(maxAttempts: 4),
     defaultHeaders: const {'X-App': 'spender'},
@@ -100,10 +108,10 @@ final client = BitmeshClient(
 
 ## App Check (mobile keys)
 
-If your key ships inside an iOS or Android app, create it as a **Mobile app**
+If your key ships inside an iOS or Android app, create it as a **mobile app**
 key in the Bitmesh dashboard. The API then refuses any request on that key
 that doesn't carry a valid [Firebase App Check](https://firebase.google.com/docs/app-check)
-token, so a secret extracted from your app binary is useless on its own.
+token, so a key extracted from your app binary is useless on its own.
 Server keys don't need this; leave the option unset.
 
 Set up App Check for your apps in the Firebase console first (Play Integrity on
@@ -132,14 +140,32 @@ final client = BitmeshClient(
 );
 ```
 
-- The provider is called before **every** signed request, retries and job
+- The provider is called before **every** request, retries and job
   polling included. Firebase caches the token and refreshes it before it
   expires, so this is cheap. Don't cache tokens yourself.
-- The token goes in the `X-Firebase-AppCheck` header. It is not part of either
-  signature, and the SDK never logs it.
-- Unsigned result downloads (`images.download`, tool results) don't send it.
+- The token goes in the `X-Firebase-AppCheck` header. The SDK never logs it.
+- Public result downloads (`images.download`, tool results) don't send it.
 - This package doesn't depend on Firebase: any function returning a token
   works, which keeps plain Dart and tests free of plugins.
+
+### Debug tokens
+
+On a simulator, or before Firebase is set up, a Bitmesh debug token
+(`bmdbg_...`, created on the key in the dashboard) can stand in for App Check.
+It is sent as `X-Bitmesh-Debug-Token`, and the token provider isn't called.
+Pick it by build mode so it never reaches a release:
+
+```dart
+final client = BitmeshClient(
+  apiKey: key,
+  options: BitmeshOptions(
+    debugToken: kDebugMode ? const String.fromEnvironment('BITMESH_DEBUG_TOKEN') : null,
+    appCheckTokenProvider: () => FirebaseAppCheck.instance.getToken(),
+  ),
+);
+```
+
+### Failures
 
 Failures are typed:
 
@@ -150,7 +176,8 @@ try {
   // No token on the device, so nothing was sent. e.cause holds the Firebase
   // error. Usually App Check isn't set up for this app in the Firebase console.
 } on BitmeshAppCheckRejectedException catch (e) {
-  // 401: the API refused the token. e.message names the reason, e.g.
+  // 401: the API refused the token (or debug token). e.message names the
+  // reason, e.g.
   // "App Check token is for an unregistered app". e.isTemporary is true only
   // when the API couldn't verify tokens at all; retry later in that case.
 }
@@ -186,28 +213,50 @@ final chat = await client.chat.create(ChatRequest(
 `completion.raw` always holds the untouched response body, so a new API field
 never blocks you.
 
-### Quirks worth knowing
+### Streaming
 
-Verified against the live API on 2026-07-27 with `bitmeshai/chat-now-nano`
-(which currently resolves to `gpt-5-nano`):
+```dart
+final reply = StringBuffer();
+await for (final chunk in client.chat.stream(request)) {
+  reply.write(chunk.text);              // new text, '' on bookkeeping chunks
+  setState(() => answer = reply.toString());
+  if (chunk.usage != null) print(chunk.usage); // last chunk: billed tokens
+}
+
+// Or collect it, with a callback per piece
+final text = await client.chat.streamText(request, onText: (t) => print(t));
+```
+
+The request is billed once, when the stream ends. Cancel the subscription (or
+`break` out of the loop) to stop generating; you pay only for what was written.
+`BitmeshOptions.timeout` covers the wait for the reply to start, not its
+length. Errors before the stream starts throw as usual; a provider failure
+mid-stream throws `BitmeshApiException`.
+
+### Things worth knowing
 
 - **`max_tokens` must be generous on reasoning models.** The budget is spent on
-  hidden reasoning tokens *before* any visible output. `maxTokens: 10` returned
-  `content: ""` with `finishReason: 'length'` and 10 reasoning tokens. If
+  hidden reasoning tokens *before* any visible output. With `maxTokens: 10`
+  the reply can be `content: ""` with `finish_reason: 'length'`. If
   `completion.text` is unexpectedly `null`, check
-  `completion.choices.first.finishReason` — `'length'` means raise the budget.
+  `completion.choices.first.finishReason`: `'length'` means raise the budget.
   A few hundred tokens is a safe floor.
 - **Some models reject non-default `temperature`, and answer 500 rather than
-  400.** `temperature: 0.2` produced
-  `500 Unsupported value: 'temperature' does not support 0.2 with this model`,
-  which surfaces as `BitmeshServerException`. Omit `temperature` unless you know
-  the model accepts it. (This is also why writes don't retry 5xx by default —
-  retrying would just burn attempts on a permanent error.)
-- **Responses come back in camelCase** (`finishReason`, `promptTokens`) even
-  though the docs show snake_case; the `test: true` debug path uses snake_case.
-  The SDK reads both, so you don't have to care.
+  400.** That surfaces as `BitmeshServerException`. Omit `temperature` unless
+  you know the model accepts it. (This is also why writes don't retry 5xx by
+  default.)
 - **`completion.model` reports the resolved upstream model**
   (`gpt-5-nano-2025-08-07`), not the alias you requested.
+- Replies use OpenAI's snake_case field names for every model, so
+  `completion.raw` reads like any OpenAI response.
+
+## Balance
+
+```dart
+final credits = await client.balance();   // GET /v2/balance
+await client.verify();                    // GET /v2/test: throws if the key
+                                          // or App Check token is refused
+```
 
 ## Images
 
@@ -289,7 +338,7 @@ final job = await client.tools.tryOnClothes(
 );
 final dressed = await client.tools.waitFor(
   job.taskId,
-  // Polling counts toward the per-IP limit of 10 media requests a minute
+  // Each poll counts toward the key's requests a minute
   options: const PollingOptions(interval: Duration(seconds: 10)),
 );
 final picture = await client.tools.fetchResultBytes(dressed.outputUrl!);
@@ -307,9 +356,41 @@ print(video.outputUrl); // signed link, valid for about 8 hours
 ```
 
 Multipart form fields travel as text. The SDK sends booleans as `"1"` / `"0"`
-and numbers as their string form, signs exactly what it sends, and leaves out
-`null`s. Result links can point at the tool provider's own storage and expire,
+and numbers as their string form, and leaves out `null`s. Result links can point at the tool provider's own storage and expire,
 so download what you want to keep.
+
+## Proxy
+
+With a proxy key, send the provider's own request, minus its API key header:
+Bitmesh adds your stored provider key. Bodies and replies pass through
+unchanged.
+
+```dart
+final proxy = BitmeshClient(apiKey: proxyKey);
+
+final reply = await proxy.proxy.post('openai', 'v1/chat/completions', {
+  'model': 'gpt-4o-mini',
+  'messages': [{'role': 'user', 'content': 'Hello'}],
+});
+
+// Provider headers that select options are passed on
+final message = await proxy.proxy.post(
+  'anthropic',
+  'v1/messages',
+  {'model': 'claude-sonnet-4-5', 'max_tokens': 256, 'messages': [...]},
+  headers: {'anthropic-version': '2023-06-01'},
+);
+
+// Streaming: the provider's server-sent events, as they arrive
+await for (final event in proxy.proxy.stream('openai', 'v1/chat/completions', body)) {
+  if (event.isDone) break;
+  final delta = event.json()['choices'][0]['delta']['content'];
+}
+
+// The whole response, headers included
+final response = await proxy.proxy.send('openai', 'v1/models');
+print(response.requestId); // X-Bitmesh-Request-Id
+```
 
 ## Errors
 
@@ -321,7 +402,9 @@ try {
 } on BitmeshAppCheckRejectedException catch (e) {
   // 401 — mobile key: App Check token missing or refused (see App Check)
 } on BitmeshAuthenticationException {
-  // 401/403 — bad or revoked credentials
+  // 401/403: bad, revoked or v1 key, or an address outside the allowlist
+} on BitmeshInsufficientBalanceException {
+  // 402: out of credits (proxy keys: no active plan)
 } on BitmeshRateLimitException catch (e) {
   // 429 — e.retryAfter tells you how long to wait
 } on BitmeshBadRequestException catch (e) {
@@ -344,7 +427,7 @@ Job helpers add `BitmeshJobFailedException` and `BitmeshJobTimeoutException`.
 ## Retries
 
 Enabled by default: 3 attempts, exponential backoff with full jitter, honouring
-`Retry-After`. Every attempt is re-signed with a fresh nonce and timestamp.
+`Retry-After`. Every attempt fetches a fresh App Check token.
 
 | Request | Retried on |
 | --- | --- |
@@ -367,9 +450,8 @@ Inject a mock transport instead of hitting the network:
 ```dart
 import 'package:http/testing.dart';
 
-final client = BitmeshClient.fromKeys(
-  'test-key',
-  'test-secret',
+final client = BitmeshClient(
+  apiKey: 'bmk_test',
   httpClient: MockClient((request) async => http.Response(
         '{"choices":[{"message":{"role":"assistant","content":"ok"}}]}',
         200,
@@ -386,44 +468,28 @@ final client = BitmeshClient.fromKeys(
 | Flutter web | full support, except `BitmeshFile.fromPath` — use `fromBytes` |
 | Dart CLI / server | full support |
 
-## Migrating from an in-app `BitmeshClient`
+## Moving from 0.x
 
-The old raw map-in/map-out methods still exist, so migration is mostly an import
-change:
+1.0.0 talks to API v2 only. Request bodies, models, limits and prices are the
+same as v1; what changes is the key and the client:
 
 ```dart
-// before
-final client = BitmeshClient(key, secret);
-final json = await client.chat({'model': 'm', 'messages': [...]});
-final video = await client.getVideo(id);
+// 0.x, v1
+final client = BitmeshClient.fromKeys(consumerKey, consumerSecret);
 
-// after — identical call sites
-final client = BitmeshClient.fromKeys(key, secret);
-final json = await client.chat({'model': 'm', 'messages': [...]});
-final video = await client.getVideo(id);
+// 1.0, v2
+final client = BitmeshClient(apiKey: 'bmk_...');
 ```
 
-`chat`, `image`, `video`, `getVideo`, `transcribeFile`, `getTranscribeRecorded`,
-`toolsGeneralBackgroundRemoval`, `toolsPortraitTryOnClothes`,
-`toolsQueryAsyncTaskResult` and `getToolsResult` all keep their original
-signatures and behaviour. `imageAnimate` and `getImageAnimate` match the PHP
-SDK's methods of the same names. Move to the typed APIs when convenient.
-
-Behaviour that intentionally changed:
-
-- Failures throw specific `BitmeshException` subtypes instead of bare
-  `Exception`/`ArgumentError`. Catch `BitmeshException` for a like-for-like
-  catch-all.
-- Requests retry by default; pass `RetryPolicy.none()` for the old behaviour.
-- Multipart uploads infer a `Content-Type` from the file extension instead of
-  always sending `application/octet-stream`.
-- List values in multipart fields are sent as `name[0]`, `name[1]`, … rather
-  than a Dart `toString()` of the list. Nested maps still flatten to
-  `parent[child]`, unchanged.
-- Connections are pooled across calls instead of opening a new one per request.
-
-The wire format of both signatures is unchanged — a test suite re-runs the
-original signing code as a reference oracle and asserts byte-identical output.
+- Create a v2 key in the dashboard. A v1 key is refused on v2 and the other
+  way round.
+- `BitmeshCredentials`, `OAuth1Signer` and the map-in/map-out compat methods
+  (`client.chat({...})`, `getVideo`, `transcribeFile`, `toolsPortraitTryOnClothes`,
+  ...) are gone. Use the typed APIs, or `createRaw` / `getRaw` for raw maps.
+- Replies are always snake_case, so `completion.raw` no longer has camelCase
+  fields such as `usage.promptTokens`.
+- New: `chat.stream`, `proxy`, `balance()`, `verify()`,
+  `BitmeshOptions.debugToken` and `BitmeshInsufficientBalanceException` (402).
 
 ## Development
 
@@ -431,15 +497,13 @@ original signing code as a reference oracle and asserts byte-identical output.
 dart pub get
 dart analyze
 dart test
-dart run example/main.dart --key=... --secret=...
+dart run example/main.dart --key=bmk_... [--debug-token=bmdbg_...]
 ```
 
-## Not supported yet
+## Not supported
 
-- Streaming chat responses (SSE). The endpoint's streaming contract isn't
-  documented; `client.chat.createRaw` is the escape hatch if you need to
-  experiment.
-- A models-list or credits endpoint — none is documented.
+- API v1 (OAuth 1.0 signing). Use 0.3.0.
+- A models-list endpoint: none is documented.
 
 ## License
 

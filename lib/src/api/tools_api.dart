@@ -7,7 +7,7 @@ import '../http/bitmesh_transport.dart';
 import '../models/tools.dart';
 import '../polling.dart';
 
-/// `/tools/*` — ready-made image and video tools.
+/// `/v2/tools/*`: ready-made image and video tools.
 ///
 /// [backgroundRemoval] answers straight away with the result link in
 /// [ToolTask.outputUrl]. [tryOnClothes] returns a task: poll
@@ -199,27 +199,6 @@ class ToolsApi {
     }
     return _transport.getPublic(trimmed);
   }
-
-  /// Raw multipart submit.
-  Future<Map<String, dynamic>> submitRaw(
-    String path, {
-    Map<String, dynamic> fields = const {},
-    Map<String, String> filePaths = const {},
-  }) =>
-      _transport.postMultipart(
-        path,
-        fields: fields,
-        files: filePaths.entries
-            .map((e) => BitmeshFile.fromPath(e.value, field: e.key))
-            .toList(),
-      );
-
-  /// Raw task polling.
-  Future<Map<String, dynamic>> queryAsyncTaskResultRaw(String taskId) =>
-      _transport.postJson(
-        '/tools/query-async-task-result',
-        {'task_id': _requireId(taskId)},
-      );
 
   String _requireId(String taskId) {
     final trimmed = taskId.trim();

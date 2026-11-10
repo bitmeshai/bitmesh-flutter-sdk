@@ -6,7 +6,7 @@ import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final credentials = BitmeshCredentials(key: 'key', secret: 'secret');
+  const key = 'bmk_test0123456789';
 
   const fastPolling = PollingOptions(
     interval: Duration(milliseconds: 1),
@@ -14,7 +14,7 @@ void main() {
   );
 
   BitmeshClient clientWith(MockClientHandler handler) => BitmeshClient(
-        credentials: credentials,
+        apiKey: key,
         options: const BitmeshOptions(retryPolicy: RetryPolicy.none()),
         httpClient: MockClient(handler),
       );
@@ -237,10 +237,10 @@ void main() {
       final done = await client.tools.waitFor('task-1', options: fastPolling);
       expect(done.isCompleted, isTrue);
       expect(done.outputUrl, '/imgrslt/cutout');
-      expect(bodies.last, '/tools/query-async-task-result');
+      expect(bodies.last, '/v2/tools/query-async-task-result');
     });
 
-    test('results are fetched unsigned as text or bytes', () async {
+    test('results are fetched without the key, as text or bytes', () async {
       final client = clientWith((request) async {
         expect(request.headers.containsKey('Authorization'), isFalse);
         return http.Response('cutout-bytes', 200);
@@ -253,34 +253,6 @@ void main() {
         ),
         isNotEmpty,
       );
-    });
-  });
-
-  group('compat layer', () {
-    test('raw methods mirror the original client API', () async {
-      final paths = <String>[];
-      final client = clientWith((request) async {
-        paths.add('${request.method} ${request.url.path}');
-        return json({'ok': true});
-      });
-
-      await client.chat({'model': 'm'});
-      await client.image({'prompt': 'p'});
-      await client.video({'prompt': 'p'});
-      await client.getVideo('v1');
-      await client.getTranscribeRecorded('t1');
-      await client.toolsQueryAsyncTaskResult('task-1');
-      await client.getToolsResult('/imgrslt/x');
-
-      expect(paths, [
-        'POST /chat',
-        'POST /image',
-        'POST /video',
-        'GET /video/v1',
-        'GET /transcribe-recorded/t1',
-        'POST /tools/query-async-task-result',
-        'GET /imgrslt/x',
-      ]);
     });
   });
 }

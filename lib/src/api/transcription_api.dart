@@ -4,8 +4,8 @@ import '../http/bitmesh_transport.dart';
 import '../models/transcription.dart';
 import '../polling.dart';
 
-/// `POST /transcribe-recorded` and `GET /transcribe-recorded/{id}` — speech to
-/// text for pre-recorded audio.
+/// `POST /v2/transcribe-recorded` and `GET /v2/transcribe-recorded/{id}`:
+/// speech to text for pre-recorded audio.
 class TranscriptionApi {
   TranscriptionApi(this._transport);
 
@@ -96,17 +96,6 @@ class TranscriptionApi {
     }
     return waitFor(job.id, options: polling, onUpdate: onUpdate);
   }
-
-  /// Raw multipart upload.
-  Future<Map<String, dynamic>> createRaw(
-    String audioFilePath, {
-    Map<String, dynamic> fields = const {},
-  }) =>
-      _transport.postMultipart(
-        _path,
-        fields: fields,
-        files: [BitmeshFile.fromPath(audioFilePath, field: 'audio')],
-      );
 
   /// Raw job lookup.
   Future<Map<String, dynamic>> getRaw(

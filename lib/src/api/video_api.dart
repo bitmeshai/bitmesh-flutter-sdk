@@ -3,7 +3,7 @@ import '../http/bitmesh_transport.dart';
 import '../models/video.dart';
 import '../polling.dart';
 
-/// `POST /video` and `GET /video/{id}` — video generation jobs.
+/// `POST /v2/video` and `GET /v2/video/{id}`: video generation jobs.
 class VideoApi {
   VideoApi(this._transport);
 
@@ -74,10 +74,6 @@ class VideoApi {
         'video/${Uri.encodeComponent(_requireId(id))}',
         query: query,
       );
-
-  /// Alias for [createRaw], so `client.video({...})` works.
-  Future<Map<String, dynamic>> call(Map<String, dynamic> payload) =>
-      createRaw(payload);
 
   String _requireId(String id) {
     final trimmed = id.trim();

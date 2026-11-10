@@ -94,7 +94,7 @@ class ChatMessage {
   }
 }
 
-/// Parameters for `POST /chat`.
+/// Parameters for `POST /v2/chat`.
 @immutable
 class ChatRequest {
   const ChatRequest({
@@ -227,7 +227,7 @@ class ChatChoice {
   String toString() => 'ChatChoice($index, finish: $finishReason)';
 }
 
-/// Response of `POST /chat`.
+/// Response of `POST /v2/chat`.
 @immutable
 class ChatCompletion {
   const ChatCompletion({
@@ -271,4 +271,52 @@ class ChatCompletion {
 
   @override
   String toString() => 'ChatCompletion(model: $model, choices: ${choices.length})';
+}
+
+/// One piece of a streamed reply, from `ChatApi.stream`.
+@immutable
+class ChatChunk {
+  const ChatChunk({
+    required this.choices,
+    required this.raw,
+    this.id,
+    this.model,
+    this.usage,
+  });
+
+  final String? id;
+  final String? model;
+
+  /// The new text of each choice is in `message.content`.
+  final List<ChatChoice> choices;
+
+  /// Set on the last chunk only: the tokens the request was billed for.
+  final TokenUsage? usage;
+
+  /// The event's JSON, for fields this SDK does not expose.
+  final Map<String, dynamic> raw;
+
+  factory ChatChunk.fromJson(Map<String, dynamic> json) {
+    final usage = asMap(json['usage']);
+    return ChatChunk(
+      id: asString(json['id']),
+      model: asString(json['model']),
+      choices: asMapList(json['choices'])
+          .map(ChatChoice.fromJson)
+          .toList(growable: false),
+      usage: usage == null ? null : TokenUsage.fromJson(usage),
+      raw: json,
+    );
+  }
+
+  /// The text this chunk adds to the first choice, or `''`.
+  String get text => choices.isEmpty ? '' : choices.first.message.content;
+
+  /// Why the first choice stopped, on its final chunk.
+  String? get finishReason =>
+      choices.isEmpty ? null : choices.first.finishReason;
+
+  @override
+  String toString() => 'ChatChunk(${text.length} chars'
+      '${usage == null ? '' : ', $usage'})';
 }
