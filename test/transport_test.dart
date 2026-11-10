@@ -1,20 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
+import 'package:bitmesh/bitmesh.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final credentials = BitmeshCredentials(key: 'key', secret: 'secret');
+  const key = 'bmk_test0123456789';
 
   BitmeshClient clientWith(
     MockClientHandler handler, {
     BitmeshOptions? options,
   }) {
     return BitmeshClient(
-      credentials: credentials,
+      apiKey: key,
       options: options ??
           const BitmeshOptions(
             retryPolicy: RetryPolicy.none(),
@@ -36,8 +36,8 @@ void main() {
         headers: {'content-type': 'application/json'},
       );
 
-  group('signed JSON requests', () {
-    test('carry both signatures and the right content type', () async {
+  group('requests', () {
+    test('carry the bearer key and the right content type', () async {
       late http.Request captured;
       final client = clientWith((request) async {
         captured = request;
@@ -47,10 +47,9 @@ void main() {
       await client.chat.createRaw({'model': 'm', 'messages': <Object>[]});
 
       expect(captured.method, 'POST');
-      expect(captured.url.toString(), 'https://api.bitmesh.ai/chat');
-      expect(captured.headers['Authorization'], startsWith('OAuth '));
-      expect(captured.headers['Authorization'], contains('oauth_signature='));
-      expect(captured.headers['X-Payload-Signature'], hasLength(64));
+      expect(captured.url.toString(), 'https://api.bitmesh.ai/v2/chat');
+      expect(captured.headers['Authorization'], 'Bearer $key');
+      expect(captured.headers.containsKey('X-Payload-Signature'), isFalse);
       expect(captured.headers['Content-Type'], startsWith('application/json'));
       expect(captured.headers['Accept'], 'application/json');
       expect(
@@ -59,28 +58,7 @@ void main() {
       );
     });
 
-    test('payload signature covers the exact body sent', () async {
-      late http.Request captured;
-      final client = clientWith((request) async {
-        captured = request;
-        return jsonResponse({'ok': true});
-      });
-
-      await client.chat.createRaw({'a': 1});
-
-      final signer = OAuth1Signer(credentials: credentials);
-      final authHeader = captured.headers['Authorization']!;
-      final oauthSignature = Uri.decodeComponent(
-        RegExp(r'oauth_signature="([^"]+)"').firstMatch(authHeader)!.group(1)!,
-      );
-
-      expect(
-        captured.headers['X-Payload-Signature'],
-        signer.payloadSignature(captured.body, oauthSignature),
-      );
-    });
-
-    test('GET requests sign an empty payload and send no body', () async {
+    test('GET requests send no body and no content type', () async {
       late http.Request captured;
       final client = clientWith((request) async {
         captured = request;
@@ -90,12 +68,13 @@ void main() {
       await client.video.get('v1');
 
       expect(captured.method, 'GET');
+      expect(captured.url.path, '/v2/video/v1');
       expect(captured.body, isEmpty);
-      expect(captured.headers['X-Payload-Signature'], hasLength(64));
+      expect(captured.headers['Authorization'], 'Bearer $key');
       expect(captured.headers.containsKey('Content-Type'), isFalse);
     });
 
-    test('query parameters are encoded into the signed URL', () async {
+    test('query parameters and ids are encoded', () async {
       late Uri captured;
       final client = clientWith((request) async {
         captured = request.url;
@@ -104,28 +83,62 @@ void main() {
 
       await client.video.get('v 1', query: {'include': 'outputs & cost'});
 
-      expect(captured.path, '/video/v%201');
+      expect(captured.path, '/v2/video/v%201');
       expect(captured.queryParameters['include'], 'outputs & cost');
     });
 
-    test('each attempt gets a fresh nonce', () async {
-      final nonces = <String>[];
-      final client = clientWith(
-        (request) async {
-          nonces.add(RegExp(r'oauth_nonce="([^"]+)"')
-              .firstMatch(request.headers['Authorization']!)!
-              .group(1)!);
-          return nonces.length < 3
-              ? http.Response('busy', 429)
-              : jsonResponse({'ok': true});
-        },
-        options: const BitmeshOptions(retryPolicy: fastRetries),
+    test('balance reads GET /v2/balance', () async {
+      late http.Request captured;
+      final client = clientWith((request) async {
+        captured = request;
+        return jsonResponse({'balance': 12.5});
+      });
+
+      expect(await client.balance(), 12.5);
+      expect(captured.method, 'GET');
+      expect(captured.url.path, '/v2/balance');
+    });
+
+    test('verify calls GET /v2/test', () async {
+      late Uri captured;
+      final client = clientWith((request) async {
+        captured = request.url;
+        return jsonResponse({'message': 'ok'});
+      });
+
+      await client.verify();
+      expect(captured.path, '/v2/test');
+    });
+  });
+
+  group('keys', () {
+    test('an empty key is refused', () {
+      expect(
+        () => BitmeshClient(apiKey: '  '),
+        throwsA(isA<BitmeshConfigurationException>()),
+      );
+    });
+
+    test('a v1 consumer key is refused', () {
+      expect(
+        () => BitmeshClient(apiKey: 'ck_live_abc'),
+        throwsA(isA<BitmeshConfigurationException>()
+            .having((e) => e.message, 'message', contains('bmk_'))),
+      );
+    });
+
+    test('surrounding whitespace is trimmed', () async {
+      late http.Request captured;
+      final client = BitmeshClient(
+        apiKey: ' $key\n',
+        httpClient: MockClient((request) async {
+          captured = request;
+          return jsonResponse({'balance': 1});
+        }),
       );
 
-      await client.chat.createRaw({'a': 1});
-
-      expect(nonces, hasLength(3));
-      expect(nonces.toSet(), hasLength(3));
+      await client.balance();
+      expect(captured.headers['Authorization'], 'Bearer $key');
     });
   });
 
@@ -153,35 +166,8 @@ void main() {
       expect(body, contains('name="options[diarize]"'));
       expect(body, contains('name="audio"; filename="note.m4a"'));
       expect(body, contains('content-type: audio/mp4'));
-      expect(captured.headers['X-Payload-Signature'], hasLength(64));
-    });
-
-    test('the signature covers unflattened fields', () async {
-      late http.Request captured;
-      final client = clientWith((request) async {
-        captured = request;
-        return jsonResponse({'id': 't1'});
-      });
-
-      final fields = <String, dynamic>{
-        'b': 2,
-        'a': {'nested': 1},
-      };
-      await client.tools.submit(
-        '/tools/general/background-removal',
-        fields: fields,
-        files: [BitmeshFile.fromBytes([9], filename: 'x.png', field: 'image')],
-      );
-
-      final signer = OAuth1Signer(credentials: credentials);
-      final oauthSignature = Uri.decodeComponent(RegExp(r'oauth_signature="([^"]+)"')
-          .firstMatch(captured.headers['Authorization']!)!
-          .group(1)!);
-
-      expect(
-        captured.headers['X-Payload-Signature'],
-        signer.multipartPayloadSignature(fields, oauthSignature),
-      );
+      expect(captured.url.path, '/v2/transcribe-recorded');
+      expect(captured.headers['Authorization'], 'Bearer $key');
     });
 
     test('missing local files fail before any request is sent', () async {
@@ -219,6 +205,7 @@ void main() {
 
       await check(400, isA<BitmeshBadRequestException>());
       await check(401, isA<BitmeshAuthenticationException>());
+      await check(402, isA<BitmeshInsufficientBalanceException>());
       await check(403, isA<BitmeshAuthenticationException>());
       await check(404, isA<BitmeshNotFoundException>());
       await check(429, isA<BitmeshRateLimitException>());
@@ -462,20 +449,20 @@ void main() {
       );
 
       await client.chat.createRaw({});
-      expect(captured.toString(), 'https://staging.example.com/api/chat');
+      expect(captured.toString(), 'https://staging.example.com/api/v2/chat');
     });
 
     test('rejects a malformed base URL', () {
       expect(
         () => BitmeshClient(
-          credentials: credentials,
+          apiKey: key,
           options: const BitmeshOptions(baseUrl: 'not-a-url'),
         ),
         throwsA(isA<BitmeshConfigurationException>()),
       );
     });
 
-    test('merges default headers without letting them break signing', () async {
+    test('merges default headers without letting them replace the key', () async {
       late http.Request captured;
       final client = clientWith(
         (request) async {
@@ -492,12 +479,12 @@ void main() {
       await client.chat.createRaw({});
       expect(captured.headers['X-App'], 'spender');
       expect(captured.headers['User-Agent'], 'spender/1.0');
-      expect(captured.headers['Authorization'], startsWith('OAuth '));
+      expect(captured.headers['Authorization'], 'Bearer $key');
     });
 
     test('an injected http client is not closed by close()', () async {
       final inner = MockClient((_) async => jsonResponse({'ok': true}));
-      final client = BitmeshClient(credentials: credentials, httpClient: inner);
+      final client = BitmeshClient(apiKey: key, httpClient: inner);
 
       client.close();
       // Would throw if the client had been closed.
@@ -505,7 +492,7 @@ void main() {
           isA<http.Response>());
     });
 
-    test('logs retries and failures without leaking credentials', () async {
+    test('logs retries and failures without leaking the key', () async {
       final messages = <String>[];
       final client = clientWith(
         (_) async => http.Response('rate limited', 429),
@@ -518,11 +505,11 @@ void main() {
       await expectLater(client.chat.createRaw({}), throwsA(isA<BitmeshApiException>()));
 
       expect(messages.where((m) => m.contains('Retrying')), hasLength(2));
-      expect(messages.any((m) => m.contains('secret')), isFalse);
+      expect(messages.any((m) => m.contains(key)), isFalse);
     });
   });
 
-  group('unsigned result fetching', () {
+  group('public result fetching', () {
     test('image results are fetched without an Authorization header', () async {
       late http.Request captured;
       final client = clientWith((request) async {

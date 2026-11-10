@@ -4,11 +4,11 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
-import '../auth/oauth1_signer.dart';
 import '../bitmesh_file.dart';
 import '../bitmesh_options.dart';
 import '../exceptions.dart';
 import '../logging.dart';
+import 'server_sent_events.dart';
 
 /// A completed HTTP exchange.
 class BitmeshResponse {
@@ -20,11 +20,19 @@ class BitmeshResponse {
 
   final int statusCode;
   final Uint8List bodyBytes;
+
+  /// Response headers, names in lower case.
   final Map<String, String> headers;
 
   bool get isSuccess => statusCode >= 200 && statusCode < 300;
 
+  /// `X-Bitmesh-Request-Id`, when the API sent one (proxy and streamed chat).
+  String? get requestId => headers['x-bitmesh-request-id'];
+
   late final String body = _decodeBody();
+
+  /// The body parsed as a JSON object.
+  Map<String, dynamic> json() => BitmeshTransport.decodeJsonObject(body);
 
   String _decodeBody() {
     try {
@@ -35,16 +43,17 @@ class BitmeshResponse {
   }
 }
 
-/// Signs, sends and retries HTTP requests against the Bitmesh API.
+/// Sends and retries HTTP requests against the Bitmesh API v2.
 ///
-/// This is the only layer that talks to `package:http`. Every request is signed
-/// per attempt, so retried requests carry a fresh nonce and timestamp.
+/// This is the only layer that talks to `package:http`. Each attempt asks for
+/// a fresh App Check token, so a retry never carries an expired one.
 class BitmeshTransport {
   BitmeshTransport({
-    required this.signer,
+    required String apiKey,
     required this.options,
     http.Client? httpClient,
-  })  : _httpClient = httpClient ?? http.Client(),
+  })  : _apiKey = apiKey,
+        _httpClient = httpClient ?? http.Client(),
         _ownsHttpClient = httpClient == null {
     final parsed = Uri.tryParse(options.baseUrl);
     if (parsed == null || !parsed.hasScheme || parsed.host.isEmpty) {
@@ -55,78 +64,45 @@ class BitmeshTransport {
     }
   }
 
+  /// The API version every authenticated path is served under.
+  static const String apiVersion = 'v2';
+
   /// Header carrying the Firebase App Check token on mobile keys.
   static const String appCheckHeader = 'X-Firebase-AppCheck';
 
-  final OAuth1Signer signer;
+  /// Header carrying a debug token in place of App Check while testing.
+  static const String debugTokenHeader = 'X-Bitmesh-Debug-Token';
+
+  final String _apiKey;
   final BitmeshOptions options;
   final http.Client _httpClient;
   final bool _ownsHttpClient;
 
   BitmeshLogger? get _logger => options.logger;
 
-  /// Signed `POST` with a JSON body, returning a decoded JSON object.
+  /// `POST` with a JSON body, returning a decoded JSON object.
   Future<Map<String, dynamic>> postJson(
     String path,
-    Map<String, dynamic> payload, {
-    String method = 'POST',
-  }) async {
-    final uri = buildUri(path);
-    final jsonBody = jsonEncode(payload);
-
-    final response = await _send(
-      method: method,
-      uri: uri,
-      idempotent: false,
-      buildRequest: () async {
-        final appCheckToken = await _appCheckToken();
-        final oauth = signer.generateParams(method, uri);
-        return http.Request(method, uri)
-          ..headers.addAll(_headers(
-            oauth: oauth,
-            appCheckToken: appCheckToken,
-            payloadSignature:
-                signer.payloadSignature(jsonBody, oauth['oauth_signature']!),
-            contentType: 'application/json',
-          ))
-          ..body = jsonBody;
-      },
-    );
-
-    return decodeJsonObject(response.body);
+    Map<String, dynamic> payload,
+  ) async {
+    final response = await send('POST', path, body: jsonEncode(payload));
+    return response.json();
   }
 
-  /// Signed `GET`, returning a decoded JSON object.
+  /// `GET`, returning a decoded JSON object.
   Future<Map<String, dynamic>> getJson(
     String path, {
     Map<String, String> query = const {},
   }) async {
-    final uri = buildUri(path, query: query);
-
-    final response = await _send(
-      method: 'GET',
-      uri: uri,
-      idempotent: true,
-      buildRequest: () async {
-        final appCheckToken = await _appCheckToken();
-        final oauth = signer.generateParams('GET', uri);
-        return http.Request('GET', uri)
-          ..headers.addAll(_headers(
-            oauth: oauth,
-            appCheckToken: appCheckToken,
-            payloadSignature:
-                signer.payloadSignature('', oauth['oauth_signature']!),
-          ));
-      },
-    );
-
-    return decodeJsonObject(response.body);
+    final response = await send('GET', path, query: query);
+    return response.json();
   }
 
-  /// Signed `multipart/form-data` `POST`, returning a decoded JSON object.
+  /// `multipart/form-data` `POST`, returning a decoded JSON object.
   ///
-  /// [fields] may be nested; nested maps are flattened to `parent[child]` form
-  /// field names, while the payload signature covers the un-flattened JSON.
+  /// Nested maps are flattened to `parent[child]` field names and lists to
+  /// `name[0]`, `name[1]`. Booleans are sent as `"1"` / `"0"`, numbers as
+  /// text, and `null`s are left out.
   Future<Map<String, dynamic>> postMultipart(
     String path, {
     Map<String, dynamic> fields = const {},
@@ -136,27 +112,16 @@ class BitmeshTransport {
       file.validate();
     }
 
-    final uri = buildUri(path);
-    // Multipart carries text: send exactly the strings the signature covers.
-    final flatFields = flattenFields(OAuth1Signer.multipartWireFields(fields));
+    final uri = apiUri(path);
+    final flatFields = flattenFields(multipartWireFields(fields));
 
-    final response = await _send(
+    final exchange = await _send(
       method: 'POST',
       uri: uri,
       idempotent: false,
       buildRequest: () async {
-        final appCheckToken = await _appCheckToken();
-        final oauth = signer.generateParams('POST', uri);
         final request = http.MultipartRequest('POST', uri)
-          ..headers.addAll(_headers(
-            oauth: oauth,
-            appCheckToken: appCheckToken,
-            payloadSignature: signer.multipartPayloadSignature(
-              fields,
-              oauth['oauth_signature']!,
-            ),
-          ));
-
+          ..headers.addAll({..._baseHeaders(), ...await _authHeaders()});
         flatFields.forEach((key, value) {
           request.fields[key] = value?.toString() ?? '';
         });
@@ -168,16 +133,78 @@ class BitmeshTransport {
       },
     );
 
-    return decodeJsonObject(response.body);
+    return exchange.response.json();
   }
 
-  /// Unsigned `GET` for public result URLs (`/imgrslt/...`, tool outputs).
-  Future<BitmeshResponse> getPublic(String path) => getPublicUri(buildUri(path));
+  /// An authenticated request to `{baseUrl}/v2/{path}`, returning the whole
+  /// response. Non-2xx answers throw a [BitmeshApiException].
+  ///
+  /// [body] is sent as is, as `application/json` unless [headers] say
+  /// otherwise. Only `GET` is retried on server errors.
+  Future<BitmeshResponse> send(
+    String method,
+    String path, {
+    String? body,
+    Map<String, String> query = const {},
+    Map<String, String> headers = const {},
+  }) async {
+    final uri = apiUri(path, query: query);
+    final exchange = await _send(
+      method: method,
+      uri: uri,
+      idempotent: method == 'GET',
+      buildRequest: () => _request(method, uri, body, headers),
+    );
+    return exchange.response;
+  }
 
-  /// Unsigned `GET` of an absolute URL, such as a result link that a tool's
-  /// provider hosts itself.
-  Future<BitmeshResponse> getPublicUri(Uri uri) {
-    return _send(
+  /// An authenticated request whose reply is a stream of server-sent events.
+  ///
+  /// Retries and errors are handled as for [send] until the response starts;
+  /// after that, events are passed on as they arrive. Cancelling the
+  /// subscription closes the connection.
+  Stream<ServerSentEvent> stream(
+    String method,
+    String path, {
+    String? body,
+    Map<String, String> query = const {},
+    Map<String, String> headers = const {},
+    void Function(BitmeshResponse head)? onResponse,
+  }) async* {
+    final uri = apiUri(path, query: query);
+    final exchange = await _send(
+      method: method,
+      uri: uri,
+      idempotent: false,
+      stream: true,
+      buildRequest: () => _request(
+        method,
+        uri,
+        body,
+        {'Accept': 'text/event-stream', ...headers},
+      ),
+    );
+    onResponse?.call(exchange.response);
+
+    try {
+      yield* exchange.body!.transform(const ServerSentEventDecoder());
+    } on http.ClientException catch (e, s) {
+      throw _networkFailure(method, uri, e, s);
+    } catch (e, s) {
+      if (_isNetworkError(e)) throw _networkFailure(method, uri, e, s);
+      rethrow;
+    }
+  }
+
+  /// Unsigned `GET` for public result paths (`/imgrslt/...`, tool outputs),
+  /// relative to the base URL, not to `/v2`.
+  Future<BitmeshResponse> getPublic(String path) =>
+      getPublicUri(_uri(path));
+
+  /// Unauthenticated `GET` of an absolute URL, such as a result link that a
+  /// tool's provider hosts itself.
+  Future<BitmeshResponse> getPublicUri(Uri uri) async {
+    final exchange = await _send(
       method: 'GET',
       uri: uri,
       idempotent: true,
@@ -187,20 +214,46 @@ class BitmeshTransport {
           if (options.userAgent != null) 'User-Agent': options.userAgent!,
         }),
     );
+    return exchange.response;
   }
 
-  /// Builds an absolute URL from a path relative to [BitmeshOptions.baseUrl].
-  ///
-  /// Query values are encoded exactly as the API's signature verification
-  /// expects, so the resulting [Uri] can be signed as-is.
-  Uri buildUri(String path, {Map<String, String> query = const {}}) {
+  /// `{baseUrl}/v2/{path}`.
+  Uri apiUri(String path, {Map<String, String> query = const {}}) =>
+      _uri('$apiVersion/${path.replaceAll(RegExp(r'^/+'), '')}', query: query);
+
+  Uri _uri(String path, {Map<String, String> query = const {}}) {
     final base = options.baseUrl.replaceAll(RegExp(r'/+$'), '');
     final relative = path.replaceAll(RegExp(r'^/+'), '');
-    final queryString = query.isEmpty
-        ? ''
-        : '?${query.entries.map((e) => '${Uri.encodeQueryComponent(e.key)}='
-            '${Uri.encodeQueryComponent(e.value)}').join('&')}';
-    return Uri.parse('$base/$relative$queryString');
+    final uri = Uri.parse('$base/$relative');
+    return query.isEmpty ? uri : uri.replace(queryParameters: query);
+  }
+
+  /// The fields as they go over the wire: booleans become `"1"` or `"0"`,
+  /// numbers their string form, and `null`s and empty collections are left
+  /// out. Nested maps and lists are kept for [flattenFields].
+  static Map<String, dynamic> multipartWireFields(Map<String, dynamic> fields) {
+    final wire = _wireValue(fields);
+    return wire is Map<String, dynamic> ? wire : <String, dynamic>{};
+  }
+
+  static Object? _wireValue(Object? value) {
+    if (value == null) return null;
+    if (value is bool) return value ? '1' : '0';
+    if (value is String) return value;
+    if (value is num) return value.toString();
+    if (value is Map) {
+      final out = <String, dynamic>{};
+      value.forEach((key, item) {
+        final wire = _wireValue(item);
+        if (wire != null) out[key.toString()] = wire;
+      });
+      return out.isEmpty ? null : out;
+    }
+    if (value is Iterable) {
+      final out = value.map(_wireValue).whereType<Object>().toList();
+      return out.isEmpty ? null : out;
+    }
+    return value.toString();
   }
 
   /// Flattens nested maps into `parent[child]` multipart field names.
@@ -212,9 +265,7 @@ class BitmeshTransport {
     for (final entry in fields.entries) {
       final name = prefix.isEmpty ? entry.key : '$prefix[${entry.key}]';
       final value = entry.value;
-      if (value is Map<String, dynamic>) {
-        result.addAll(flattenFields(value, name));
-      } else if (value is Map) {
+      if (value is Map) {
         result.addAll(flattenFields(value.cast<String, dynamic>(), name));
       } else if (value is Iterable) {
         var index = 0;
@@ -262,28 +313,45 @@ class BitmeshTransport {
     if (_ownsHttpClient) _httpClient.close();
   }
 
-  Map<String, String> _headers({
-    required Map<String, String> oauth,
-    required String payloadSignature,
-    String? appCheckToken,
-    String? contentType,
-  }) {
+  Future<http.BaseRequest> _request(
+    String method,
+    Uri uri,
+    String? body,
+    Map<String, String> extra,
+  ) async {
+    final request = http.Request(method, uri);
+    request.headers.addAll({
+      ..._baseHeaders(),
+      if (body != null) 'Content-Type': 'application/json',
+      ...extra,
+      ...await _authHeaders(),
+    });
+    if (body != null) request.body = body;
+    return request;
+  }
+
+  Map<String, String> _baseHeaders() => {
+        'Accept': 'application/json',
+        ...options.defaultHeaders,
+        if (options.userAgent != null) 'User-Agent': options.userAgent!,
+      };
+
+  /// The key and the App Check or debug token. Applied last, so neither
+  /// default headers nor per-call headers can replace them.
+  Future<Map<String, String>> _authHeaders() async {
+    final debugToken = options.debugToken;
+    final appCheckToken = debugToken == null ? await _appCheckToken() : null;
     return {
-      ...options.defaultHeaders,
-      if (options.userAgent != null) 'User-Agent': options.userAgent!,
-      'Authorization': signer.authorizationHeader(oauth),
-      'X-Payload-Signature': payloadSignature,
+      'Authorization': 'Bearer $_apiKey',
+      if (debugToken != null) debugTokenHeader: debugToken,
       if (appCheckToken != null) appCheckHeader: appCheckToken,
-      'Accept': 'application/json',
-      if (contentType != null) 'Content-Type': contentType,
     };
   }
 
   /// The App Check token for one attempt, or `null` when no provider is set.
   ///
-  /// Asked for per attempt, like the signature, so a retry never carries a
-  /// token that expired while backing off. A provider that fails stops the
-  /// request here: without a token a mobile key is refused anyway.
+  /// A provider that fails stops the request here: without a token a mobile
+  /// key is refused anyway.
   Future<String?> _appCheckToken() async {
     final provider = options.appCheckTokenProvider;
     if (provider == null) return null;
@@ -311,11 +379,12 @@ class BitmeshTransport {
     return token;
   }
 
-  Future<BitmeshResponse> _send({
+  Future<_Exchange> _send({
     required String method,
     required Uri uri,
     required bool idempotent,
     required Future<http.BaseRequest> Function() buildRequest,
+    bool stream = false,
   }) async {
     final policy = options.retryPolicy;
     var attempt = 0;
@@ -325,12 +394,13 @@ class BitmeshTransport {
       final isLastAttempt = attempt >= policy.maxAttempts;
 
       try {
-        final response = await _attempt(method, uri, buildRequest);
+        final exchange = await _attempt(method, uri, buildRequest, stream);
+        final response = exchange.response;
 
         if (response.isSuccess) {
           _log(BitmeshLogLevel.debug,
               '$method ${uri.path} -> ${response.statusCode}');
-          return response;
+          return exchange;
         }
 
         final error = BitmeshApiException.fromResponse(
@@ -361,13 +431,14 @@ class BitmeshTransport {
     }
   }
 
-  Future<BitmeshResponse> _attempt(
+  Future<_Exchange> _attempt(
     String method,
     Uri uri,
     Future<http.BaseRequest> Function() buildRequest,
+    bool stream,
   ) async {
     try {
-      return await _exchange(buildRequest).timeout(options.timeout);
+      return await _exchange(buildRequest, stream).timeout(options.timeout);
     } on TimeoutException {
       throw BitmeshTimeoutException(
         options.timeout,
@@ -383,16 +454,25 @@ class BitmeshTransport {
     }
   }
 
-  Future<BitmeshResponse> _exchange(
+  Future<_Exchange> _exchange(
     Future<http.BaseRequest> Function() buildRequest,
+    bool stream,
   ) async {
     final request = await buildRequest();
     final streamed = await _httpClient.send(request);
-    final bytes = await streamed.stream.toBytes();
-    return BitmeshResponse(
-      statusCode: streamed.statusCode,
-      bodyBytes: bytes,
-      headers: streamed.headers,
+    final success = streamed.statusCode >= 200 && streamed.statusCode < 300;
+
+    // A successful stream is handed on unread; anything else is read whole.
+    final body = stream && success ? streamed.stream : null;
+    final bytes = body == null ? await streamed.stream.toBytes() : Uint8List(0);
+
+    return _Exchange(
+      BitmeshResponse(
+        statusCode: streamed.statusCode,
+        bodyBytes: bytes,
+        headers: streamed.headers,
+      ),
+      body,
     );
   }
 
@@ -454,4 +534,13 @@ class BitmeshTransport {
 
   static bool _isNetworkError(Object error) =>
       _networkErrorTypes.contains(error.runtimeType.toString());
+}
+
+class _Exchange {
+  _Exchange(this.response, this.body);
+
+  final BitmeshResponse response;
+
+  /// The unread body of a successful streamed response.
+  final Stream<List<int>>? body;
 }

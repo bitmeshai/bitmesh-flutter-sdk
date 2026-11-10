@@ -1,16 +1,16 @@
 import 'dart:convert';
 
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
+import 'package:bitmesh/bitmesh.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 /// Response bodies below are copied from the live API (November 2026).
 void main() {
-  final credentials = BitmeshCredentials(key: 'key', secret: 'secret');
+  const key = 'bmk_test0123456789';
 
   BitmeshClient clientWith(MockClientHandler handler) => BitmeshClient(
-        credentials: credentials,
+        apiKey: key,
         options: const BitmeshOptions(retryPolicy: RetryPolicy.none()),
         httpClient: MockClient(handler),
       );
@@ -139,7 +139,7 @@ void main() {
   });
 
   group('multipart tool uploads', () {
-    test('send booleans and numbers as the strings they are signed as',
+    test('send booleans as 1 or 0 and numbers as text',
         () async {
       late http.Request captured;
       final client = clientWith((request) async {
@@ -160,18 +160,7 @@ void main() {
       expect(body, contains('name="resolution"\r\n\r\n1024\r\n'));
       expect(body, isNot(contains('name="test"')));
       expect(body, contains('name="person_image"; filename="p.png"'));
-
-      final oauthSignature = Uri.decodeComponent(
-          RegExp(r'oauth_signature="([^"]+)"')
-              .firstMatch(captured.headers['Authorization']!)!
-              .group(1)!);
-      expect(
-        captured.headers['X-Payload-Signature'],
-        OAuth1Signer(credentials: credentials).payloadSignature(
-          '{"resolution":"1024","restore_face":"1"}',
-          oauthSignature,
-        ),
-      );
+      expect(captured.url.path, '/v2/tools/portrait/try-on-clothes');
     });
   });
 
@@ -195,7 +184,7 @@ void main() {
       );
 
       expect(captured.method, 'POST');
-      expect(captured.url.path, '/tools/video/image-animate');
+      expect(captured.url.path, '/v2/tools/video/image-animate');
       expect(captured.headers['Content-Type'], startsWith('application/json'));
       expect(jsonDecode(captured.body), {
         'model': 'animate-2.4-faster',
@@ -257,7 +246,7 @@ void main() {
       );
 
       expect(requests, hasLength(3));
-      expect(requests.first.path, '/tools/video/image-animate/task-1');
+      expect(requests.first.path, '/v2/tools/video/image-animate/task-1');
       expect(requests.first.queryParameters, {'test': '1'});
       expect(done.outputUrl, 'https://cdn.example/v.mp4');
     });

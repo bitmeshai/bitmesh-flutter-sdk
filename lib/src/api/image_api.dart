@@ -4,7 +4,7 @@ import '../exceptions.dart';
 import '../http/bitmesh_transport.dart';
 import '../models/image.dart';
 
-/// `POST /image` — image generation, plus helpers for fetching results.
+/// `POST /v2/image`: image generation, plus helpers for fetching results.
 class ImageApi {
   ImageApi(this._transport, this._baseUrl);
 
@@ -20,10 +20,6 @@ class ImageApi {
   /// Raw request/response.
   Future<Map<String, dynamic>> generateRaw(Map<String, dynamic> payload) =>
       _transport.postJson('/image', payload);
-
-  /// Alias for [generateRaw], so `client.images({...})` works.
-  Future<Map<String, dynamic>> call(Map<String, dynamic> payload) =>
-      generateRaw(payload);
 
   /// Absolute URL for an `/imgrslt/{objectId}` result. No auth required, so it
   /// can be handed straight to `Image.network`.

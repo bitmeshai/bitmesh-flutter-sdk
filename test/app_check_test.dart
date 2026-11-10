@@ -1,23 +1,25 @@
 import 'dart:convert';
 
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
+import 'package:bitmesh/bitmesh.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final credentials = BitmeshCredentials(key: 'key', secret: 'secret');
+  const key = 'bmk_test0123456789';
 
   BitmeshClient clientWith(
     MockClientHandler handler, {
     AppCheckTokenProvider? provider,
+    String? debugToken,
     RetryPolicy retryPolicy = const RetryPolicy.none(),
   }) {
     return BitmeshClient(
-      credentials: credentials,
+      apiKey: key,
       options: BitmeshOptions(
         retryPolicy: retryPolicy,
         appCheckTokenProvider: provider,
+        debugToken: debugToken,
       ),
       httpClient: MockClient(handler),
     );
@@ -30,7 +32,7 @@ void main() {
       );
 
   group('App Check token', () {
-    test('is sent on signed JSON, GET and multipart requests', () async {
+    test('is sent on JSON, GET and multipart requests', () async {
       final captured = <http.BaseRequest>[];
       final client = clientWith(
         (request) async {
@@ -50,32 +52,8 @@ void main() {
       for (final request in captured) {
         expect(request.headers['X-Firebase-AppCheck'], 'token-1',
             reason: '${request.method} ${request.url.path}');
-        expect(request.headers['Authorization'], startsWith('OAuth '));
+        expect(request.headers['Authorization'], 'Bearer $key');
       }
-    });
-
-    test('is not part of the payload signature', () async {
-      late http.Request captured;
-      final client = clientWith(
-        (request) async {
-          captured = request;
-          return jsonResponse({'ok': true});
-        },
-        provider: () async => 'token-1',
-      );
-
-      await client.chat.createRaw({'a': 1});
-
-      final oauthSignature = Uri.decodeComponent(
-        RegExp(r'oauth_signature="([^"]+)"')
-            .firstMatch(captured.headers['Authorization']!)!
-            .group(1)!,
-      );
-      expect(
-        captured.headers['X-Payload-Signature'],
-        OAuth1Signer(credentials: credentials)
-            .payloadSignature(captured.body, oauthSignature),
-      );
     });
 
     test('is not sent when no provider is set', () async {
@@ -90,7 +68,7 @@ void main() {
       expect(captured.headers.containsKey('X-Firebase-AppCheck'), isFalse);
     });
 
-    test('is not sent on unsigned result downloads', () async {
+    test('is not sent on public result downloads', () async {
       late http.Request captured;
       final client = clientWith(
         (request) async {
@@ -108,7 +86,7 @@ void main() {
     test('overrides a default header of the same name', () async {
       late http.Request captured;
       final client = BitmeshClient(
-        credentials: credentials,
+        apiKey: key,
         options: BitmeshOptions(
           retryPolicy: const RetryPolicy.none(),
           defaultHeaders: const {'X-Firebase-AppCheck': 'stale'},
@@ -147,6 +125,45 @@ void main() {
       await client.chat.createRaw({});
 
       expect(tokens, ['token-1', 'token-2', 'token-3']);
+    });
+  });
+
+  group('debug token', () {
+    test('is sent in place of the App Check token', () async {
+      late http.Request captured;
+      var providerCalls = 0;
+      final client = clientWith(
+        (request) async {
+          captured = request;
+          return jsonResponse({'balance': 1});
+        },
+        provider: () {
+          providerCalls++;
+          throw StateError('no App Check on a simulator');
+        },
+        debugToken: 'bmdbg_abc',
+      );
+
+      await client.balance();
+
+      expect(captured.headers['X-Bitmesh-Debug-Token'], 'bmdbg_abc');
+      expect(captured.headers.containsKey('X-Firebase-AppCheck'), isFalse);
+      expect(providerCalls, 0);
+    });
+
+    test('a refused debug token is an App Check rejection', () async {
+      final client = clientWith(
+        (_) async => jsonResponse(
+          {'error': 'Debug token has expired'},
+          status: 401,
+        ),
+        debugToken: 'bmdbg_old',
+      );
+
+      await expectLater(
+        client.balance(),
+        throwsA(isA<BitmeshAppCheckRejectedException>()),
+      );
     });
   });
 
@@ -255,7 +272,7 @@ void main() {
 
     test('other 401s stay plain authentication errors', () async {
       final client = clientWith(
-        (_) async => jsonResponse({'error': 'Invalid signature'}, status: 401),
+        (_) async => jsonResponse({'error': 'Invalid API key'}, status: 401),
         provider: () => 'token-1',
       );
 

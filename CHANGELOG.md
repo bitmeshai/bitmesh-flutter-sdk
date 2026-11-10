@@ -1,3 +1,32 @@
+## 1.0.0
+
+API v2 only. v1 (OAuth 1.0 consumer key and secret) is no longer supported;
+stay on 0.3.0 for a v1 key.
+
+- Renamed from `bitmesh_flutter_sdk` to `bitmesh` and published on pub.dev:
+  `bitmesh: ^1.0.0`, `import 'package:bitmesh/bitmesh.dart'`.
+
+- `BitmeshClient(apiKey: 'bmk_...')` sends the key as
+  `Authorization: Bearer` to `{baseUrl}/v2/...`. Keys that don't start with
+  `bmk_` are refused when the client is created.
+- Streaming chat: `client.chat.stream` yields `ChatChunk`s (text, then usage)
+  from the server-sent events; `client.chat.streamText` collects them.
+- Proxy keys: `client.proxy.post`, `get`, `send` and `stream` for
+  `/v2/proxy/{provider}/{path}`.
+- `client.balance()` (`GET /v2/balance`) and `client.verify()`
+  (`GET /v2/test`).
+- `BitmeshOptions.debugToken`: sends `X-Bitmesh-Debug-Token` in place of the
+  App Check token while testing a mobile key. Debug token refusals throw
+  `BitmeshAppCheckRejectedException`.
+- `BitmeshInsufficientBalanceException` for `402`.
+- `BitmeshResponse.requestId` and `json()`.
+- Removed: `BitmeshCredentials`, `OAuth1Signer`, the payload signatures, the
+  `crypto` dependency, the compat extension (`client.chat({...})`,
+  `getVideo`, `transcribeFile`, ...), the callable API aliases,
+  `TranscriptionApi.createRaw(path)`, `ToolsApi.submitRaw` and
+  `queryAsyncTaskResultRaw`, and the camelCase fallback when reading replies
+  (v2 always answers in snake_case).
+
 ## 0.3.0
 
 - Image-to-video: `client.tools.imageAnimate`, `imageAnimateStatus` and

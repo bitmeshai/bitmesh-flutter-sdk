@@ -1,40 +1,43 @@
-// Runnable end-to-end tour of the SDK.
+// Runnable end-to-end tour of the SDK against the Bitmesh API v2.
 //
-//   dart run example/main.dart --key=... --secret=...
+//   dart run example/main.dart --key=bmk_... [--base-url=https://...]
 //
-// Pass --video / --transcribe=<path> to exercise the long-running endpoints.
+// Pass --image, --video or --transcribe=<path> to try the other endpoints.
+// A mobile key also needs --debug-token=bmdbg_... when run from a terminal.
 import 'dart:io';
 
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
+import 'package:bitmesh/bitmesh.dart';
 
 Future<void> main(List<String> args) async {
   final options = _parseArgs(args);
   final key = options['key'];
-  final secret = options['secret'];
 
-  if (key == null || secret == null) {
-    stderr.writeln('Usage: dart run example/main.dart --key=... --secret=...');
+  if (key == null) {
+    stderr.writeln('Usage: dart run example/main.dart --key=bmk_...');
     exitCode = 64;
     return;
   }
 
-  final client = BitmeshClient.fromKeys(
-    key,
-    secret,
-    options: const BitmeshOptions(
-      timeout: Duration(seconds: 45),
-      logger: ConsoleBitmeshLogger(minimumLevel: BitmeshLogLevel.warning),
+  final client = BitmeshClient(
+    apiKey: key,
+    options: BitmeshOptions(
+      baseUrl: options['base-url'] ?? BitmeshOptions.defaultBaseUrl,
+      timeout: const Duration(seconds: 45),
+      debugToken: options['debug-token'],
+      logger:
+          const ConsoleBitmeshLogger(minimumLevel: BitmeshLogLevel.warning),
     ),
   );
 
   try {
+    stdout.writeln('balance: ${await client.balance()}');
     await _chat(client);
     if (options.containsKey('image')) await _image(client);
     if (options.containsKey('video')) await _video(client);
     final audioPath = options['transcribe'];
     if (audioPath != null) await _transcribe(client, audioPath);
   } on BitmeshAuthenticationException catch (e) {
-    stderr.writeln('Credentials rejected: ${e.message}');
+    stderr.writeln('Key rejected: ${e.message}');
     exitCode = 77;
   } on BitmeshApiException catch (e) {
     stderr.writeln('API error ${e.statusCode}: ${e.message}');
@@ -56,12 +59,21 @@ Future<void> _chat(BitmeshClient client) async {
       ChatMessage.system('Answer with a single short sentence.'),
       ChatMessage.user('What is a Dart isolate?'),
     ],
-    maxTokens: 120,
-    temperature: 0.2,
+    maxTokens: 400,
   ));
 
   stdout.writeln(completion.text ?? '(no content)');
   stdout.writeln('tokens: ${completion.usage?.totalTokens ?? '?'}');
+
+  stdout.writeln('\n== chat, streamed ==');
+  await for (final chunk in client.chat.stream(const ChatRequest(
+    model: 'bitmeshai/chat-now-nano',
+    messages: [ChatMessage.user('Name three uses of a Dart isolate.')],
+    maxTokens: 400,
+  ))) {
+    stdout.write(chunk.text);
+    if (chunk.usage != null) stdout.writeln('\ntokens: ${chunk.usage}');
+  }
 }
 
 Future<void> _image(BitmeshClient client) async {
