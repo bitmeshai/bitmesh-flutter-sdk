@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
-import 'package:bitmesh_flutter_sdk/src/http/server_sent_events.dart';
+import 'package:bitmesh/bitmesh.dart';
+import 'package:bitmesh/src/http/server_sent_events.dart';
 import 'package:http/http.dart' as http;
 import 'package:test/test.dart';
 

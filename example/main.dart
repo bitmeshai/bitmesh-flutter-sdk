@@ -6,7 +6,7 @@
 // A mobile key also needs --debug-token=bmdbg_... when run from a terminal.
 import 'dart:io';
 
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
+import 'package:bitmesh/bitmesh.dart';
 
 Future<void> main(List<String> args) async {
   final options = _parseArgs(args);

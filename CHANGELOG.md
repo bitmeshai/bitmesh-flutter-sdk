@@ -3,6 +3,9 @@
 API v2 only. v1 (OAuth 1.0 consumer key and secret) is no longer supported;
 stay on 0.3.0 for a v1 key.
 
+- Renamed from `bitmesh_flutter_sdk` to `bitmesh` and published on pub.dev:
+  `bitmesh: ^1.0.0`, `import 'package:bitmesh/bitmesh.dart'`.
+
 - `BitmeshClient(apiKey: 'bmk_...')` sends the key as
   `Authorization: Bearer` to `{baseUrl}/v2/...`. Keys that don't start with
   `bmk_` are refused when the client is created.

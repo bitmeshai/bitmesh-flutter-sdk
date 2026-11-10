@@ -1,8 +1,7 @@
-name: bitmesh_flutter_sdk
+name: bitmesh
 description: >-
-  Dart & Flutter SDK for the Bitmesh AI API v2. Chat completions with
-  streaming, image and video generation, audio transcription, tools and the
-  provider proxy, with typed models, retries, App Check and job polling.
+  Dart and Flutter SDK for the Bitmesh AI API: chat with streaming, images,
+  video, transcription, tools and the provider proxy, with App Check support.
 version: 1.0.0
 homepage: https://bitmesh.ai
 repository: https://github.com/bitmeshai/bitmesh-flutter-sdk

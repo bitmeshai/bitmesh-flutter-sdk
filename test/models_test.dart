@@ -1,4 +1,4 @@
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
+import 'package:bitmesh/bitmesh.dart';
 import 'package:test/test.dart';
 
 void main() {

@@ -1,4 +1,4 @@
-# bitmesh_flutter_sdk
+# bitmesh
 
 A Dart & Flutter SDK for the [Bitmesh](https://bitmesh.ai) AI API **v2**.
 
@@ -25,26 +25,30 @@ API v1 (OAuth 1.0 consumer key and secret) is not supported from 1.0.0 on. Use
 
 ## Install
 
+```bash
+flutter pub add bitmesh     # or: dart pub add bitmesh
+```
+
 ```yaml
 dependencies:
-  bitmesh_flutter_sdk:
-    git:
-      url: https://github.com/bitmeshai/bitmesh-flutter-sdk.git
-      ref: v1.0.0
+  bitmesh: ^1.0.0
 ```
 
 Or, while developing side by side:
 
 ```yaml
 dependencies:
-  bitmesh_flutter_sdk:
+  bitmesh:
     path: ../bitmesh-flutter-sdk
 ```
+
+Up to 0.3.0 (API v1) the package was called `bitmesh_flutter_sdk` and was
+installed from this repository with `git:` and `ref: v0.3.0`.
 
 ## Quick start
 
 ```dart
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
+import 'package:bitmesh/bitmesh.dart';
 
 final client = BitmeshClient(apiKey: 'bmk_...');
 
@@ -473,11 +477,24 @@ final client = BitmeshClient(
 1.0.0 talks to API v2 only. Request bodies, models, limits and prices are the
 same as v1; what changes is the key and the client:
 
+```yaml
+# 0.x, v1
+bitmesh_flutter_sdk:
+  git:
+    url: https://github.com/bitmeshai/bitmesh-flutter-sdk.git
+    ref: v0.3.0
+
+# 1.0, v2, from pub.dev
+bitmesh: ^1.0.0
+```
+
 ```dart
 // 0.x, v1
+import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
 final client = BitmeshClient.fromKeys(consumerKey, consumerSecret);
 
 // 1.0, v2
+import 'package:bitmesh/bitmesh.dart';
 final client = BitmeshClient(apiKey: 'bmk_...');
 ```
 

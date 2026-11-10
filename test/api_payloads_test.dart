@@ -2,7 +2,7 @@
 // streamed or not.
 import 'dart:convert';
 
-import 'package:bitmesh_flutter_sdk/bitmesh_flutter_sdk.dart';
+import 'package:bitmesh/bitmesh.dart';
 import 'package:test/test.dart';
 
 /// `POST /v2/chat`, `model: bitmeshai/chat-now-nano`.
