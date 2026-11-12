@@ -9,7 +9,8 @@ anywhere Dart runs.
 
 - **Chat** completions across 90+ models, whole or **streamed**
 - **Image** and **video** generation, with polling for async video jobs
-- **Transcription** of recorded audio, from a file path or from memory
+- **Transcription** of recorded audio, from a file path or from memory, and
+  **real-time** over a WebSocket while the person is still speaking
 - **Tools**: background removal, virtual try-on and image-to-video
   (`image-animate`), with task polling
 - The **proxy**: call OpenAI, Anthropic and other providers with a proxy key
@@ -31,7 +32,7 @@ flutter pub add bitmesh     # or: dart pub add bitmesh
 
 ```yaml
 dependencies:
-  bitmesh: ^1.0.0
+  bitmesh: ^1.1.0
 ```
 
 Or, while developing side by side:
@@ -321,6 +322,47 @@ final job = await client.transcription.transcribe(
 );
 ```
 
+### Real-time
+
+Stream audio as it is recorded and get the transcript turn by turn, over a
+WebSocket to `/v2/transcribe-realtime`. Needs `dart:io` (Android, iOS,
+desktop, server): browsers can't send the key header on a WebSocket.
+
+```dart
+final session = await client.transcription.connectRealtime(
+  sampleRate: 16000,
+  speechModel: RealtimeSpeechModel.universal36Pro, // the default
+);
+
+session.events.listen((event) {
+  // The same turn arrives again as it grows; keep the final one.
+  if (event is RealtimeTurn && event.endOfTurn) print(event.transcript);
+});
+
+// Raw 16-bit little-endian mono PCM, about 50 ms (1,600 bytes at 16 kHz) at a time
+await for (final chunk in microphone) {
+  session.sendAudio(chunk);
+}
+
+final end = await session.terminate();
+print('${end?.sessionDurationSeconds} s billed');
+```
+
+- A refused connection throws before any audio is sent:
+  `BitmeshInsufficientBalanceException` when the balance covers less than a
+  minute, `BitmeshRateLimitException` when the key already has 5 sessions
+  open, `BitmeshBadRequestException` for unknown settings.
+- `session.events` ends when the session closes. A close other than a normal
+  one adds a `BitmeshRealtimeClosedException` first: `3008` at the time limit
+  (an hour, or what the balance covers), `1001` when the server restarts,
+  `1011` when the transcription service fails.
+- The session is billed per second it is open, silence included: call
+  `terminate()` as soon as you are done.
+- Models: `universal-3-6-pro` (32 languages), `universal-streaming-english`,
+  `universal-streaming-multilingual`. `formatTurns: true` punctuates the
+  streaming models; `languageDetection: true` adds `languageCode` to each turn.
+  `forceEndpoint()` ends the current turn now.
+
 ## Tools
 
 ```dart
@@ -469,7 +511,7 @@ final client = BitmeshClient(
 | Platform | Status |
 | --- | --- |
 | Android / iOS / macOS / Windows / Linux | full support |
-| Flutter web | full support, except `BitmeshFile.fromPath` — use `fromBytes` |
+| Flutter web | full support, except `BitmeshFile.fromPath` (use `fromBytes`) and real-time transcription |
 | Dart CLI / server | full support |
 
 ## Moving from 0.x

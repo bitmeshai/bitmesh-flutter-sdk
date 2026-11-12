@@ -1,3 +1,20 @@
+## 1.1.0
+
+- Real-time transcription: `client.transcription.connectRealtime` opens a
+  WebSocket to `/v2/transcribe-realtime` and returns a
+  `RealtimeTranscriptionSession`. Send audio with `sendAudio` (or
+  `sendAudioStream`), read `RealtimeBegin`, `RealtimeTurn` and
+  `RealtimeTermination` from `events`, and end it with `terminate()`.
+  `forceEndpoint()` and `sendMessage` send control messages.
+- A refused connection throws the usual typed errors (`401`, `402`, `422`,
+  `429`, ...) before any audio is sent. A session that closes other than
+  normally ends `events` with `BitmeshRealtimeClosedException` (`3008` at the
+  time limit).
+- `RealtimeSpeechModel` names the three real-time models.
+- `BitmeshTransport.authenticatedHeaders()`.
+- Needs `dart:io`; on the web `connectRealtime` throws
+  `BitmeshConfigurationException`.
+
 ## 1.0.0
 
 API v2 only. v1 (OAuth 1.0 consumer key and secret) is no longer supported;

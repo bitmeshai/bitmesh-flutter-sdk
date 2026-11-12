@@ -54,6 +54,30 @@ class BitmeshAppCheckTokenException extends BitmeshException {
       '${cause == null ? '' : ' (caused by $cause)'}';
 }
 
+/// A real-time transcription session closed other than normally (close code
+/// `1000`). It arrives as an error on the session's events, after any
+/// `RealtimeTermination`.
+///
+/// [code] `3008`: the session reached its time limit (an hour, or less when
+/// the balance covers less). `1001`: the server restarted; reconnect, the
+/// session is billed for the time it ran. `1011`: the transcription service
+/// failed. Other codes from `3000` to `4999` come from the transcription
+/// service, with the reason in [message]. `1006`: the connection was lost
+/// without a close message.
+class BitmeshRealtimeClosedException extends BitmeshException {
+  const BitmeshRealtimeClosedException(this.code, String reason)
+      : super(reason);
+
+  /// The WebSocket close code.
+  final int code;
+
+  /// `true` for `3008`, a session that reached its time limit.
+  bool get isTimeLimit => code == 3008;
+
+  @override
+  String toString() => 'BitmeshRealtimeClosedException: [$code] $message';
+}
+
 /// Thrown when a single HTTP attempt exceeded [BitmeshOptions.timeout].
 class BitmeshTimeoutException extends BitmeshException {
   const BitmeshTimeoutException(this.timeout, {String? detail})
