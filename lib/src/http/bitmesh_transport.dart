@@ -217,6 +217,12 @@ class BitmeshTransport {
     return exchange.response;
   }
 
+  /// The headers of an authenticated request: defaults, `User-Agent`, the
+  /// key and the App Check or debug token. For connections the transport
+  /// doesn't send itself, such as a real-time transcription WebSocket.
+  Future<Map<String, String>> authenticatedHeaders() async =>
+      {..._baseHeaders(), ...await _authHeaders()};
+
   /// `{baseUrl}/v2/{path}`.
   Uri apiUri(String path, {Map<String, String> query = const {}}) =>
       _uri('$apiVersion/${path.replaceAll(RegExp(r'^/+'), '')}', query: query);

@@ -2,8 +2,8 @@
 ///
 /// Sends your `bmk_` key as a bearer token, plus the Firebase App Check token
 /// on mobile keys, and exposes chat (streaming included), image, video,
-/// transcription, tools and the provider proxy as typed calls with retries
-/// and job polling built in.
+/// transcription (real-time included), tools and the provider proxy as typed
+/// calls with retries and job polling built in.
 ///
 /// ```dart
 /// final client = BitmeshClient(apiKey: 'bmk_...');
@@ -37,7 +37,9 @@ export 'src/logging.dart';
 export 'src/models/chat.dart';
 export 'src/models/image.dart';
 export 'src/models/job_status.dart';
+export 'src/models/realtime.dart';
 export 'src/models/transcription.dart';
 export 'src/models/tools.dart';
 export 'src/models/video.dart';
 export 'src/polling.dart';
+export 'src/realtime/realtime_session.dart' show RealtimeTranscriptionSession;
